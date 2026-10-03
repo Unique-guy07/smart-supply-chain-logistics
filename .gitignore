@@ -1,0 +1,26 @@
+# CMake build directories
+build/
+build-asan/
+
+# Visual Studio / IDE files
+.vs/
+.vscode/
+
+# Build outputs
+*.exe
+*.obj
+*.lib
+*.pdb
+*.ilk
+*.idb
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+
+# OS files
+Thumbs.db
+.DS_Store
