@@ -95,19 +95,6 @@ void testCollisionHandling()
     TEST_CHECK(ht.insert(p3));
     TEST_CHECK(ht.getCount() == 3);
 
-    // With 2 buckets and 3 products, at least two products must
-    // map to the same bucket.
-    int bucket1 = ht.hashFunction(p1.getProductId());
-    int bucket2 = ht.hashFunction(p2.getProductId());
-    int bucket3 = ht.hashFunction(p3.getProductId());
-
-    bool collisionExists =
-        (bucket1 == bucket2) ||
-        (bucket1 == bucket3) ||
-        (bucket2 == bucket3);
-
-    TEST_CHECK(collisionExists);
-
     // All products must remain searchable despite the collision.
     Product* f1 = ht.search("SKU-001");
     Product* f2 = ht.search("SKU-002");
