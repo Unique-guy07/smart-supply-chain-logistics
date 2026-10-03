@@ -1,6 +1,7 @@
 # CMake build directories
 build/
 build-asan/
+build-asan-*/
 
 # Visual Studio / IDE files
 .vs/

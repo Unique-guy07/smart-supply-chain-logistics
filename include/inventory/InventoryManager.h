@@ -1,30 +1,31 @@
 #pragma once
 
+#include "inventory/BST.h"
 #include "inventory/HashTable.h"
 #include "inventory/Product.h"
 #include <string>
+#include <vector>
 
 /// InventoryManager — sole business-level gateway for inventory operations.
 ///
-/// Owns a HashTable as the primary Product-ID index (Milestone 1).
-/// The BST ordered index will be integrated in Milestone 2.
+/// Owns a HashTable as the primary Product-ID index and a BST ordered index.
 ///
 /// Architecture:
 ///   InventoryManager
-///       ├── HashTable   ← active (Milestone 1)
-///       └── BST         ← planned (Milestone 2)
+///       ├── HashTable   ← canonical Product ownership and fast lookup
+///       └── BST         ← ordered Product-ID index
 class InventoryManager
 {
 private:
     HashTable hashTable;
-    // BST bstIndex;  // Milestone 2 — slot preserved, not active
+    BST bstIndex;
 
 public:
     /// Constructs an InventoryManager with the given hash table capacity.
     /// @throws std::invalid_argument if hashTableCapacity <= 0
     explicit InventoryManager(int hashTableCapacity);
 
-    // No explicit destructor — RAII handles cleanup via HashTable's destructor.
+    // No explicit destructor — RAII handles cleanup through both owned indexes.
     // Non-copyable, non-movable (inherited from HashTable member).
 
     /// Add a product to inventory.
@@ -46,6 +47,9 @@ public:
 
     int getProductCount() const;
     bool isEmpty() const;
+
+    /// Return product IDs in the BST's lexicographic order.
+    std::vector<std::string> getProductIdsInOrder() const;
 
     /// Display the full inventory.
     void displayInventory() const;

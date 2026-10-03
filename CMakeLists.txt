@@ -19,6 +19,7 @@ endif()
 add_library(inventory_core STATIC
     src/inventory/Product.cpp
     src/inventory/HashTable.cpp
+    src/inventory/BST.cpp
     src/inventory/InventoryManager.cpp
 )
 target_include_directories(inventory_core PUBLIC ${PROJECT_SOURCE_DIR}/include)
@@ -41,6 +42,10 @@ add_test(NAME TestProduct COMMAND test_product)
 add_executable(test_hash_table tests/test_hash_table.cpp)
 target_link_libraries(test_hash_table PRIVATE inventory_core)
 add_test(NAME TestHashTable COMMAND test_hash_table)
+
+add_executable(test_bst tests/test_bst.cpp)
+target_link_libraries(test_bst PRIVATE inventory_core)
+add_test(NAME TestBST COMMAND test_bst)
 
 add_executable(test_inventory_manager tests/test_inventory_manager.cpp)
 target_link_libraries(test_inventory_manager PRIVATE inventory_core)
