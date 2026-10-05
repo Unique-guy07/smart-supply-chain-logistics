@@ -25,3 +25,6 @@ Makefile
 # OS files
 Thumbs.db
 .DS_Store
+
+build-m3-correction/
+build-copilot-final/
