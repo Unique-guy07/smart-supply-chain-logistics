@@ -22,6 +22,8 @@ add_library(inventory_core STATIC
     src/inventory/LinearProbingHashTable.cpp
     src/inventory/BST.cpp
     src/inventory/InventoryManager.cpp
+    src/order/Order.cpp
+    src/order/OrderManager.cpp
 )
 target_include_directories(inventory_core PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
@@ -55,3 +57,15 @@ add_test(NAME TestBST COMMAND test_bst)
 add_executable(test_inventory_manager tests/test_inventory_manager.cpp)
 target_link_libraries(test_inventory_manager PRIVATE inventory_core)
 add_test(NAME TestInventoryManager COMMAND test_inventory_manager)
+
+add_executable(test_queue tests/test_queue.cpp)
+target_link_libraries(test_queue PRIVATE inventory_core)
+add_test(NAME TestQueue COMMAND test_queue)
+
+add_executable(test_order tests/test_order.cpp)
+target_link_libraries(test_order PRIVATE inventory_core)
+add_test(NAME TestOrder COMMAND test_order)
+
+add_executable(test_order_manager tests/test_order_manager.cpp)
+target_link_libraries(test_order_manager PRIVATE inventory_core)
+add_test(NAME TestOrderManager COMMAND test_order_manager)
