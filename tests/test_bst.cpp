@@ -410,6 +410,235 @@ void testRootDeletionZeroOrOneChild()
 }
 
 // ---------------------------------------------------------------------------
+// M5 Test: Iterative traversals on empty and single-element trees
+// ---------------------------------------------------------------------------
+void testIterativeTraversalsEmptyAndSingle()
+{
+    // Empty tree
+    {
+        BST tree;
+        const std::vector<std::string> empty;
+        TEST_CHECK(tree.inorderIterative() == empty);
+        TEST_CHECK(tree.preorderIterative() == empty);
+        TEST_CHECK(tree.inorderIterative() == tree.inorder());
+        TEST_CHECK(tree.preorderIterative() == tree.preorder());
+    }
+
+    // Single element tree
+    {
+        BST tree;
+        tree.insert("SKU-001");
+        const std::vector<std::string> expected{"SKU-001"};
+        TEST_CHECK(tree.inorderIterative() == expected);
+        TEST_CHECK(tree.preorderIterative() == expected);
+        TEST_CHECK(tree.inorderIterative() == tree.inorder());
+        TEST_CHECK(tree.preorderIterative() == tree.preorder());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// M5 Test: Iterative traversals on balanced and skewed trees
+// ---------------------------------------------------------------------------
+void testIterativeTraversalsBalancedAndSkewed()
+{
+    // Balanced tree
+    {
+        BST tree;
+        tree.insert("M");
+        tree.insert("C");
+        tree.insert("T");
+        tree.insert("A");
+        tree.insert("E");
+        tree.insert("R");
+        tree.insert("Z");
+
+        TEST_CHECK(tree.inorderIterative() == tree.inorder());
+        TEST_CHECK(tree.preorderIterative() == tree.preorder());
+
+        const std::vector<std::string> expectedIn{"A", "C", "E", "M", "R", "T", "Z"};
+        const std::vector<std::string> expectedPre{"M", "C", "A", "E", "T", "R", "Z"};
+        TEST_CHECK(tree.inorderIterative() == expectedIn);
+        TEST_CHECK(tree.preorderIterative() == expectedPre);
+    }
+
+    // Skewed left tree: E -> D -> C -> B -> A
+    {
+        BST tree;
+        tree.insert("E");
+        tree.insert("D");
+        tree.insert("C");
+        tree.insert("B");
+        tree.insert("A");
+
+        TEST_CHECK(tree.inorderIterative() == tree.inorder());
+        TEST_CHECK(tree.preorderIterative() == tree.preorder());
+        const std::vector<std::string> expectedIn{"A", "B", "C", "D", "E"};
+        const std::vector<std::string> expectedPre{"E", "D", "C", "B", "A"};
+        TEST_CHECK(tree.inorderIterative() == expectedIn);
+        TEST_CHECK(tree.preorderIterative() == expectedPre);
+    }
+
+    // Skewed right tree: A -> B -> C -> D -> E
+    {
+        BST tree;
+        tree.insert("A");
+        tree.insert("B");
+        tree.insert("C");
+        tree.insert("D");
+        tree.insert("E");
+
+        TEST_CHECK(tree.inorderIterative() == tree.inorder());
+        TEST_CHECK(tree.preorderIterative() == tree.preorder());
+        const std::vector<std::string> expectedIn{"A", "B", "C", "D", "E"};
+        const std::vector<std::string> expectedPre{"A", "B", "C", "D", "E"};
+        TEST_CHECK(tree.inorderIterative() == expectedIn);
+        TEST_CHECK(tree.preorderIterative() == expectedPre);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// M5 Test: Tree serialization and deserialization round-trip
+// ---------------------------------------------------------------------------
+void testSerializationAndDeserializationRoundTrip()
+{
+    // Empty tree round trip
+    {
+        BST tree;
+        TEST_CHECK(tree.serialize().empty());
+        TEST_CHECK(tree.deserialize(""));
+        TEST_CHECK(tree.isEmpty());
+        TEST_CHECK(tree.getCount() == 0);
+    }
+
+    // Balanced tree round trip
+    {
+        BST tree;
+        tree.insert("M");
+        tree.insert("C");
+        tree.insert("T");
+        tree.insert("A");
+        tree.insert("E");
+        tree.insert("R");
+        tree.insert("Z");
+
+        std::string serialized = tree.serialize();
+        TEST_CHECK(serialized == "1:M;1:C;1:A;1:E;1:T;1:R;1:Z;");
+
+        BST tree2;
+        TEST_CHECK(tree2.deserialize(serialized));
+        TEST_CHECK(tree2.getCount() == 7);
+        TEST_CHECK(tree2.inorder() == tree.inorder());
+        TEST_CHECK(tree2.preorder() == tree.preorder());
+        TEST_CHECK(tree2.postorder() == tree.postorder());
+        TEST_CHECK(tree2.inorderIterative() == tree.inorderIterative());
+        TEST_CHECK(tree2.preorderIterative() == tree.preorderIterative());
+
+        // Verify key searchability
+        TEST_CHECK(tree2.contains("M"));
+        TEST_CHECK(tree2.contains("A"));
+        TEST_CHECK(tree2.contains("Z"));
+        TEST_CHECK(!tree2.contains("Q"));
+    }
+
+    // Product IDs containing commas, spaces, tabs, newlines, colons, and semicolons
+    {
+        BST tree;
+        TEST_CHECK(tree.insert("SKU,1"));
+        TEST_CHECK(tree.insert("SKU 2"));
+        TEST_CHECK(tree.insert("SKU\t3"));
+        TEST_CHECK(tree.insert("SKU\n4"));
+        TEST_CHECK(tree.insert("SKU:5;XYZ"));
+
+        std::string serialized = tree.serialize();
+        BST tree2;
+        TEST_CHECK(tree2.deserialize(serialized));
+        TEST_CHECK(tree2.getCount() == 5);
+        TEST_CHECK(tree2.inorder() == tree.inorder());
+        TEST_CHECK(tree2.preorder() == tree.preorder());
+        TEST_CHECK(tree2.postorder() == tree.postorder());
+
+        TEST_CHECK(tree2.contains("SKU,1"));
+        TEST_CHECK(tree2.contains("SKU 2"));
+        TEST_CHECK(tree2.contains("SKU\t3"));
+        TEST_CHECK(tree2.contains("SKU\n4"));
+        TEST_CHECK(tree2.contains("SKU:5;XYZ"));
+    }
+
+    // Empty product ID round-trip
+    {
+        BST tree;
+        TEST_CHECK(tree.insert(""));
+        TEST_CHECK(tree.insert("B"));
+        TEST_CHECK(tree.insert("A"));
+
+        std::string serialized = tree.serialize();
+        TEST_CHECK(serialized == "0:;1:B;1:A;");
+
+        BST tree2;
+        TEST_CHECK(tree2.deserialize(serialized));
+        TEST_CHECK(tree2.getCount() == 3);
+        TEST_CHECK(tree2.contains(""));
+        TEST_CHECK(tree2.contains("B"));
+        TEST_CHECK(tree2.contains("A"));
+        TEST_CHECK(tree2.inorder() == tree.inorder());
+        TEST_CHECK(tree2.preorder() == tree.preorder());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// M5 Test: Deserialization validation and error handling
+// ---------------------------------------------------------------------------
+void testDeserializationValidationRejection()
+{
+    // 1. Out-of-order pre-order sequence violating BST ordering:
+    // In "1:M;1:T;1:C;", "C" appears after "T", but all nodes with key < "M" must appear
+    // before any node with key > "M".
+    {
+        BST tree;
+        tree.insert("PRESERVE_ME");
+        TEST_CHECK(!tree.deserialize("1:M;1:T;1:C;"));
+        // Strong guarantee: tree is untouched on error
+        TEST_CHECK(tree.getCount() == 1);
+        TEST_CHECK(tree.contains("PRESERVE_ME"));
+    }
+
+    // 2. Duplicate key in sequence
+    {
+        BST tree;
+        tree.insert("PRESERVE_ME");
+        TEST_CHECK(!tree.deserialize("1:M;1:C;1:M;"));
+        TEST_CHECK(tree.getCount() == 1);
+        TEST_CHECK(tree.contains("PRESERVE_ME"));
+    }
+
+    // 3. Truncated or malformed framing delimiters
+    {
+        BST tree;
+        tree.insert("PRESERVE_ME");
+
+        // Payload shorter than declared length
+        TEST_CHECK(!tree.deserialize("5:ABC;"));
+        // Missing trailing delimiter
+        TEST_CHECK(!tree.deserialize("3:ABC"));
+        // Non-digit length prefix
+        TEST_CHECK(!tree.deserialize("abc:M;"));
+        TEST_CHECK(!tree.deserialize(":M;"));
+        TEST_CHECK(!tree.deserialize("-1:M;"));
+        // Missing colon
+        TEST_CHECK(!tree.deserialize("1M;"));
+        // Trailing garbage
+        TEST_CHECK(!tree.deserialize("1:M;junk"));
+        // Old comma-separated format must be rejected safely
+        TEST_CHECK(!tree.deserialize("M,C,T"));
+        TEST_CHECK(!tree.deserialize(",,"));
+
+        // Verify original tree untouched after all malformed attempts
+        TEST_CHECK(tree.getCount() == 1);
+        TEST_CHECK(tree.contains("PRESERVE_ME"));
+    }
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 int main()
@@ -427,5 +656,10 @@ int main()
     TEST_RUN(testRootDeletionZeroOrOneChild);
     TEST_RUN(testMissingDeletion);
     TEST_RUN(testDestructorCleanup);
+    // M5 Additions
+    TEST_RUN(testIterativeTraversalsEmptyAndSingle);
+    TEST_RUN(testIterativeTraversalsBalancedAndSkewed);
+    TEST_RUN(testSerializationAndDeserializationRoundTrip);
+    TEST_RUN(testDeserializationValidationRejection);
     TEST_REPORT();
 }

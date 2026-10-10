@@ -22,6 +22,7 @@ add_library(inventory_core STATIC
     src/inventory/LinearProbingHashTable.cpp
     src/inventory/BST.cpp
     src/inventory/InventoryManager.cpp
+    src/inventory/SlottingEngine.cpp
     src/order/Order.cpp
     src/order/OrderManager.cpp
     src/order/ExpressionEvaluator.cpp
@@ -87,3 +88,7 @@ add_test(NAME TestExpressionEvaluator COMMAND test_expression_evaluator)
 add_executable(test_freight_pricing tests/test_freight_pricing.cpp)
 target_link_libraries(test_freight_pricing PRIVATE inventory_core)
 add_test(NAME TestFreightPricing COMMAND test_freight_pricing)
+
+add_executable(test_slotting tests/test_slotting.cpp)
+target_link_libraries(test_slotting PRIVATE inventory_core)
+add_test(NAME TestSlotting COMMAND test_slotting)

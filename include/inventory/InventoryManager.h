@@ -4,6 +4,7 @@
 #include "inventory/HashTable.h"
 #include "inventory/LinearProbingHashTable.h"
 #include "inventory/Product.h"
+#include "inventory/SlottingEngine.h"
 #include <string>
 #include <vector>
 
@@ -47,6 +48,7 @@ public:
     /// Find a product by ID via canonical master index (HashTable).
     /// @return Pointer to stored canonical Product, or nullptr if not found.
     Product* findProduct(const std::string& productId);
+    const Product* findProduct(const std::string& productId) const;
 
     /// Find a product by ID via secondary embedded index (LinearProbingHashTable).
     /// @return Pointer to stored canonical Product, or nullptr if not found.
@@ -68,6 +70,19 @@ public:
 
     /// Return product IDs in the BST's lexicographic order.
     std::vector<std::string> getProductIdsInOrder() const;
+
+    /// Return read-only pointers to canonical products in BST in-order sequence.
+    /// Does not duplicate product ownership or expose internal mutable structures.
+    [[nodiscard]] std::vector<const Product*> getAllProductsInOrder() const;
+
+    /// Analyzes hierarchical inventory slotting and generates an ABC classification report.
+    /// Read-only operation — does not mutate product locations or quantities.
+    [[nodiscard]] SlottingReport analyzeSlotting(
+        const ABCThresholds& thresholds = ABCThresholds{},
+        const SlottingZoneMapping& mapping = SlottingZoneMapping{}) const;
+
+    /// Read-only export of the current BST product-ID index state.
+    [[nodiscard]] std::string serializeProductIndex() const;
 
     /// Display the full inventory across both index tiers.
     void displayInventory() const;

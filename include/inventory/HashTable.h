@@ -56,6 +56,7 @@ public:
     /// Search for a product by ID.
     /// @return Pointer to the stored Product, or nullptr if not found.
     Product* search(const std::string& productId);
+    const Product* search(const std::string& productId) const;
 
     /// Remove a product by ID.
     /// @return true if found and removed, false if not found.

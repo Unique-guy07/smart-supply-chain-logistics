@@ -25,11 +25,17 @@ private:
 
     Node* remove(Node* node, const std::string& productId, bool& removed);
     Node* detachMin(Node*& node);
-    void clear(Node* node);
+    static void clear(Node* node);
 
     void inorder(const Node* node, std::vector<std::string>& result) const;
     void preorder(const Node* node, std::vector<std::string>& result) const;
     void postorder(const Node* node, std::vector<std::string>& result) const;
+
+    static Node* buildFromPreorder(const std::vector<std::string>& tokens,
+                                   std::size_t& index,
+                                   const std::string* minBound,
+                                   const std::string* maxBound,
+                                   int& nodeCount);
 
 public:
     BST();
@@ -57,4 +63,18 @@ public:
     std::vector<std::string> inorder() const;
     std::vector<std::string> preorder() const;
     std::vector<std::string> postorder() const;
+
+    /// Non-recursive in-order traversal using custom LIFO Stack.
+    std::vector<std::string> inorderIterative() const;
+
+    /// Non-recursive pre-order traversal using custom LIFO Stack.
+    std::vector<std::string> preorderIterative() const;
+
+    /// Serializes BST state into an unambiguous length-prefixed pre-order string (<len>:<key>;).
+    std::string serialize() const;
+
+    /// Deserializes and validates a BST from pre-order serialized data.
+    /// Replaces the current tree on success; leaves current tree untouched on failure.
+    /// @return true if valid and successfully reconstructed; false if malformed or duplicate.
+    bool deserialize(const std::string& data);
 };

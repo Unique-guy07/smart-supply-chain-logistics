@@ -1,4 +1,7 @@
 #include "inventory/BST.h"
+#include "order/Stack.h"
+#include <algorithm>
+#include <cctype>
 
 // ---------------------------------------------------------------------------
 // Node and lifecycle
@@ -215,4 +218,207 @@ void BST::postorder(const Node* node, std::vector<std::string>& result) const
     postorder(node->left, result);
     postorder(node->right, result);
     result.push_back(node->productId);
+}
+
+// ---------------------------------------------------------------------------
+// M5 Iterative Traversals (using custom Stack<T>)
+// ---------------------------------------------------------------------------
+
+std::vector<std::string> BST::inorderIterative() const
+{
+    std::vector<std::string> result;
+    result.reserve(static_cast<std::size_t>(count));
+
+    Stack<const Node*> stack;
+    const Node* current = root;
+
+    while (current != nullptr || !stack.empty()) {
+        while (current != nullptr) {
+            stack.push(current);
+            current = current->left;
+        }
+
+        current = stack.top();
+        stack.pop();
+        result.push_back(current->productId);
+        current = current->right;
+    }
+
+    return result;
+}
+
+std::vector<std::string> BST::preorderIterative() const
+{
+    std::vector<std::string> result;
+    result.reserve(static_cast<std::size_t>(count));
+
+    if (root == nullptr) {
+        return result;
+    }
+
+    Stack<const Node*> stack;
+    stack.push(root);
+
+    while (!stack.empty()) {
+        const Node* current = stack.top();
+        stack.pop();
+        result.push_back(current->productId);
+
+        // Push right child first so left child is popped and processed first
+        if (current->right != nullptr) {
+            stack.push(current->right);
+        }
+        if (current->left != nullptr) {
+            stack.push(current->left);
+        }
+    }
+
+    return result;
+}
+
+// ---------------------------------------------------------------------------
+// M5 Tree Serialization & Deserialization
+// ---------------------------------------------------------------------------
+
+std::string BST::serialize() const
+{
+    std::vector<std::string> pre = preorderIterative();
+    if (pre.empty()) {
+        return "";
+    }
+
+    std::string result;
+    for (const auto& key : pre) {
+        result += std::to_string(key.length());
+        result += ':';
+        result += key;
+        result += ';';
+    }
+    return result;
+}
+
+BST::Node* BST::buildFromPreorder(const std::vector<std::string>& tokens,
+                                  std::size_t& index,
+                                  const std::string* minBound,
+                                  const std::string* maxBound,
+                                  int& nodeCount)
+{
+    if (index >= tokens.size()) {
+        return nullptr;
+    }
+
+    const std::string& key = tokens[index];
+
+    // Enforce strict BST ordering: every key must be within (minBound, maxBound)
+    if (minBound != nullptr && key <= *minBound) {
+        return nullptr;
+    }
+    if (maxBound != nullptr && key >= *maxBound) {
+        return nullptr;
+    }
+
+    // Key is within valid range for this subtree: consume it
+    Node* node = new Node(key);
+    ++nodeCount;
+    ++index;
+
+    try {
+        node->left = buildFromPreorder(tokens, index, minBound, &key, nodeCount);
+        node->right = buildFromPreorder(tokens, index, &key, maxBound, nodeCount);
+    } catch (...) {
+        // Safe post-order cleanup on allocation failure
+        clear(node->left);
+        clear(node->right);
+        delete node;
+        throw;
+    }
+
+    return node;
+}
+
+bool BST::deserialize(const std::string& data)
+{
+    // Empty data represents an empty tree
+    if (data.empty()) {
+        clear(root);
+        root = nullptr;
+        count = 0;
+        return true;
+    }
+
+    // Parse length-prefixed tokens (<len>:<key>;)
+    std::vector<std::string> tokens;
+    std::size_t pos = 0;
+    const std::size_t totalLen = data.length();
+
+    while (pos < totalLen) {
+        std::size_t colonPos = data.find(':', pos);
+        if (colonPos == std::string::npos || colonPos == pos) {
+            return false; // Missing colon or empty length prefix
+        }
+
+        // Validate that length prefix contains only ASCII digits
+        for (std::size_t i = pos; i < colonPos; ++i) {
+            if (!std::isdigit(static_cast<unsigned char>(data[i]))) {
+                return false;
+            }
+        }
+
+        std::string lenStr = data.substr(pos, colonPos - pos);
+        // Prevent std::stoull overflow or excessive lengths
+        if (lenStr.length() > 10) {
+            return false;
+        }
+
+        std::size_t tokenLen = 0;
+        try {
+            tokenLen = static_cast<std::size_t>(std::stoull(lenStr));
+        } catch (...) {
+            return false;
+        }
+
+        std::size_t payloadStart = colonPos + 1;
+        // Verify we have tokenLen characters plus the trailing ';' framing delimiter
+        if (payloadStart + tokenLen >= totalLen) {
+            return false; // Truncated payload or missing ';'
+        }
+
+        if (data[payloadStart + tokenLen] != ';') {
+            return false; // Missing framing delimiter ';'
+        }
+
+        tokens.push_back(data.substr(payloadStart, tokenLen));
+        pos = payloadStart + tokenLen + 1;
+    }
+
+    if (tokens.empty()) {
+        clear(root);
+        root = nullptr;
+        count = 0;
+        return true;
+    }
+
+    // Reconstruct into candidate tree with strict BST invariant bounds
+    std::size_t index = 0;
+    int candidateCount = 0;
+    Node* candidateRoot = nullptr;
+
+    try {
+        candidateRoot = buildFromPreorder(tokens, index, nullptr, nullptr, candidateCount);
+    } catch (...) {
+        clear(candidateRoot);
+        return false;
+    }
+
+    // Validation: all tokens must be consumed and candidate root non-null
+    if (index != tokens.size() || candidateRoot == nullptr) {
+        clear(candidateRoot);
+        return false;
+    }
+
+    // Success: atomically swap with current tree (strong exception guarantee)
+    clear(root);
+    root = candidateRoot;
+    count = candidateCount;
+    return true;
 }

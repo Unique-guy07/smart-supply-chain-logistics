@@ -77,6 +77,11 @@ Product* InventoryManager::findProduct(const std::string& productId)
     return hashTable.search(productId);
 }
 
+const Product* InventoryManager::findProduct(const std::string& productId) const
+{
+    return hashTable.search(productId);
+}
+
 Product* InventoryManager::findProductOnDevice(const std::string& productId) const
 {
     return deviceIndex.search(productId);
@@ -168,6 +173,33 @@ bool InventoryManager::isEmpty() const
 std::vector<std::string> InventoryManager::getProductIdsInOrder() const
 {
     return bstIndex.inorder();
+}
+
+std::vector<const Product*> InventoryManager::getAllProductsInOrder() const
+{
+    std::vector<const Product*> result;
+    result.reserve(static_cast<std::size_t>(hashTable.getCount()));
+
+    std::vector<std::string> ids = bstIndex.inorder();
+    for (const auto& id : ids) {
+        const Product* p = hashTable.search(id);
+        if (p != nullptr) {
+            result.push_back(p);
+        }
+    }
+    return result;
+}
+
+SlottingReport InventoryManager::analyzeSlotting(
+    const ABCThresholds& thresholds,
+    const SlottingZoneMapping& mapping) const
+{
+    return SlottingEngine::analyze(getAllProductsInOrder(), thresholds, mapping);
+}
+
+std::string InventoryManager::serializeProductIndex() const
+{
+    return bstIndex.serialize();
 }
 
 // ---------------------------------------------------------------------------

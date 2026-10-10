@@ -87,6 +87,12 @@ bool HashTable::insert(const Product& product)
 
 Product* HashTable::search(const std::string& productId)
 {
+    return const_cast<Product*>(
+        static_cast<const HashTable*>(this)->search(productId));
+}
+
+const Product* HashTable::search(const std::string& productId) const
+{
     int index = hash(productId);
     Node* current = table[index];
     while (current != nullptr) {
