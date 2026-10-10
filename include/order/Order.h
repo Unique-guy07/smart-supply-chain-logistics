@@ -48,6 +48,9 @@ private:
     OrderStatus status{OrderStatus::Pending};
     std::vector<OrderItem> items;
     double totalPrice{0.0};
+    double shippingDistance{0.0};
+    double shippingWeight{0.0};
+    double freightCost{0.0};
     std::string failureReason;
     bool isFrozen{false};
 
@@ -59,6 +62,7 @@ private:
     void setFailureReason(const std::string& reason);
     void setItemPriceSnapshot(std::size_t index, double price);
     void setTotalPrice(double total) noexcept;
+    void setFreightCost(double cost) noexcept;
 
 public:
     Order();
@@ -70,12 +74,21 @@ public:
     /// @return true if added, false if productId is empty, quantity <= 0, or order is frozen.
     bool addItem(const std::string& productId, int quantity);
 
+    /// Sets explicit shipping distance (km) and weight (kg).
+    /// Rejects non-finite, negative, or out-of-bound values without mutating existing configuration.
+    /// @return true if parameters were valid and updated; false otherwise.
+    bool setShippingParameters(double distance, double weight);
+
     const std::string& getOrderId() const noexcept;
     const std::string& getCustomerId() const noexcept;
     OrderPriority getPriority() const noexcept;
     OrderStatus getStatus() const noexcept;
     const std::vector<OrderItem>& getItems() const noexcept;
     double getTotalPrice() const noexcept;
+    double getShippingDistance() const noexcept;
+    double getShippingWeight() const noexcept;
+    double getFreightCost() const noexcept;
+    double getGrandTotal() const noexcept;
     const std::string& getFailureReason() const noexcept;
     bool isSubmitted() const noexcept;
 };

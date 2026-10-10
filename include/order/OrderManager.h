@@ -1,6 +1,7 @@
 #pragma once
 
 #include "inventory/InventoryManager.h"
+#include "order/FreightPricingEngine.h"
 #include "order/MinMaxHeap.h"
 #include "order/Order.h"
 #include "order/Queue.h"
@@ -65,6 +66,9 @@ private:
     // DEPQ for dual-ended priority dispatch
     MinMaxHeap<DispatchEntry> dispatchHeap;
     std::uint64_t nextSequenceNumber{1};
+
+    // Dynamic Freight Pricing Engine
+    FreightPricingEngine pricingEngine;
 
     // Test seam for failure injection during mutation
     std::function<void(const std::string& sku)> preMutationHook;
@@ -149,4 +153,8 @@ public:
     std::size_t getCancelledCount() const noexcept;
     std::size_t getTotalOrderCount() const noexcept;
     bool hasPendingOrders() const noexcept;
+
+    /// Dynamic Freight Pricing Engine accessors
+    FreightPricingEngine& getPricingEngine() noexcept;
+    const FreightPricingEngine& getPricingEngine() const noexcept;
 };

@@ -1,4 +1,5 @@
 #include "order/Order.h"
+#include <cmath>
 
 // ---------------------------------------------------------------------------
 // Constructors
@@ -10,6 +11,9 @@ Order::Order()
     , priority(OrderPriority::Normal)
     , status(OrderStatus::Pending)
     , totalPrice(0.0)
+    , shippingDistance(0.0)
+    , shippingWeight(0.0)
+    , freightCost(0.0)
     , failureReason("")
     , isFrozen(false)
 {
@@ -21,13 +25,16 @@ Order::Order(std::string orderId, std::string customerId, OrderPriority priority
     , priority(priority)
     , status(OrderStatus::Pending)
     , totalPrice(0.0)
+    , shippingDistance(0.0)
+    , shippingWeight(0.0)
+    , freightCost(0.0)
     , failureReason("")
     , isFrozen(false)
 {
 }
 
 // ---------------------------------------------------------------------------
-// Item addition
+// Item addition & shipping configuration
 // ---------------------------------------------------------------------------
 
 bool Order::addItem(const std::string& productId, int quantity)
@@ -44,6 +51,23 @@ bool Order::addItem(const std::string& productId, int quantity)
     item.quantity = quantity;
     item.unitPriceSnapshot = 0.0;
     items.push_back(std::move(item));
+    return true;
+}
+
+bool Order::setShippingParameters(double distance, double weight)
+{
+    if (isFrozen) {
+        return false;
+    }
+    if (!std::isfinite(distance) || distance < 0.0 || distance > 50000.0) {
+        return false;
+    }
+    if (!std::isfinite(weight) || weight < 0.0 || weight > 100000.0) {
+        return false;
+    }
+
+    shippingDistance = distance;
+    shippingWeight = weight;
     return true;
 }
 
@@ -104,6 +128,11 @@ void Order::setTotalPrice(double total) noexcept
     totalPrice = total;
 }
 
+void Order::setFreightCost(double cost) noexcept
+{
+    freightCost = cost;
+}
+
 // ---------------------------------------------------------------------------
 // Getters
 // ---------------------------------------------------------------------------
@@ -136,6 +165,26 @@ const std::vector<OrderItem>& Order::getItems() const noexcept
 double Order::getTotalPrice() const noexcept
 {
     return totalPrice;
+}
+
+double Order::getShippingDistance() const noexcept
+{
+    return shippingDistance;
+}
+
+double Order::getShippingWeight() const noexcept
+{
+    return shippingWeight;
+}
+
+double Order::getFreightCost() const noexcept
+{
+    return freightCost;
+}
+
+double Order::getGrandTotal() const noexcept
+{
+    return totalPrice + freightCost;
 }
 
 const std::string& Order::getFailureReason() const noexcept

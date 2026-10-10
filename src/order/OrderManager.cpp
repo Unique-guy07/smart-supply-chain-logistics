@@ -141,6 +141,15 @@ bool OrderManager::submitOrder(const Order& order)
         }
     }
 
+    // 3b. Validate shipping inputs and calculate dynamic freight pricing
+    const double dist = workingOrder.getShippingDistance();
+    const double wt = workingOrder.getShippingWeight();
+    const auto freightResult = pricingEngine.calculateFreight(dist, wt, workingOrder.getPriority());
+    if (!freightResult.success) {
+        return false; // Reject order if freight pricing fails
+    }
+    workingOrder.setFreightCost(freightResult.cost);
+
     // 4. Freeze order immutability
     workingOrder.freeze();
 
@@ -536,4 +545,14 @@ std::size_t OrderManager::getTotalOrderCount() const noexcept
 bool OrderManager::hasPendingOrders() const noexcept
 {
     return getPendingCount() > 0;
+}
+
+FreightPricingEngine& OrderManager::getPricingEngine() noexcept
+{
+    return pricingEngine;
+}
+
+const FreightPricingEngine& OrderManager::getPricingEngine() const noexcept
+{
+    return pricingEngine;
 }

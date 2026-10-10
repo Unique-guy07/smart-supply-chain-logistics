@@ -24,6 +24,8 @@ add_library(inventory_core STATIC
     src/inventory/InventoryManager.cpp
     src/order/Order.cpp
     src/order/OrderManager.cpp
+    src/order/ExpressionEvaluator.cpp
+    src/order/FreightPricingEngine.cpp
 )
 target_include_directories(inventory_core PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
@@ -73,3 +75,15 @@ add_test(NAME TestOrderManager COMMAND test_order_manager)
 add_executable(test_min_max_heap tests/test_min_max_heap.cpp)
 target_link_libraries(test_min_max_heap PRIVATE inventory_core)
 add_test(NAME TestMinMaxHeap COMMAND test_min_max_heap)
+
+add_executable(test_stack tests/test_stack.cpp)
+target_link_libraries(test_stack PRIVATE inventory_core)
+add_test(NAME TestStack COMMAND test_stack)
+
+add_executable(test_expression_evaluator tests/test_expression_evaluator.cpp)
+target_link_libraries(test_expression_evaluator PRIVATE inventory_core)
+add_test(NAME TestExpressionEvaluator COMMAND test_expression_evaluator)
+
+add_executable(test_freight_pricing tests/test_freight_pricing.cpp)
+target_link_libraries(test_freight_pricing PRIVATE inventory_core)
+add_test(NAME TestFreightPricing COMMAND test_freight_pricing)
