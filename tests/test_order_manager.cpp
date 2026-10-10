@@ -607,5 +607,3 @@ int main()
     TEST_RUN(testSequenceCounterBoundaryPolicy);
     TEST_REPORT();
 }
-
-
