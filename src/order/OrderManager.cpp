@@ -13,6 +13,8 @@ OrderManager::OrderManager(InventoryManager& inventoryManager)
     , highQueue()
     , normalQueue()
     , lowQueue()
+    , dispatchHeap()
+    , nextSequenceNumber(1)
     , preMutationHook(nullptr)
 {
 }
@@ -37,7 +39,7 @@ Queue<std::string>& OrderManager::getQueueForPriority(OrderPriority priority)
 }
 
 // ---------------------------------------------------------------------------
-// Scheduler: Select next pending order ID in priority order
+// Scheduler: Select next pending order ID in FIFO priority order
 // ---------------------------------------------------------------------------
 
 bool OrderManager::selectNextPendingOrderId(std::string& outOrderId)
@@ -96,7 +98,7 @@ bool OrderManager::snapshotCatalogPrices(Order& order)
 }
 
 // ---------------------------------------------------------------------------
-// Order Submission (Dual-storage atomic commit)
+// Order Submission (Multi-structure atomic registration)
 // ---------------------------------------------------------------------------
 
 bool OrderManager::submitOrder(const Order& order)
@@ -142,17 +144,56 @@ bool OrderManager::submitOrder(const Order& order)
     // 4. Freeze order immutability
     workingOrder.freeze();
 
-    // 5. Dual-commit: insert into registry, then enqueue in lane
+    // Check sequence counter boundary before assignment to prevent wrapping
+    if (nextSequenceNumber == std::numeric_limits<std::uint64_t>::max()) {
+        bool hasLiveOrders = false;
+        for (const auto& [existingId, existingOrder] : orders) {
+            const OrderStatus st = existingOrder.getStatus();
+            if (st == OrderStatus::Pending || st == OrderStatus::Processing) {
+                hasLiveOrders = true;
+                break;
+            }
+        }
+        if (hasLiveOrders) {
+            // Refuse intake to protect deterministic priority ordering while live entries exist
+            return false;
+        }
+        // No live pending orders remain: safely reset counter and clear stale dispatch entries
+        nextSequenceNumber = 1;
+        dispatchHeap.clear();
+    }
+
+    // Prepare DEPQ entry with discrete priority rank and monotonic sequence number
+    const DispatchEntry dispatchEntry{
+        id,
+        getPriorityRank(workingOrder.getPriority()),
+        nextSequenceNumber++
+    };
+
+    // 5. Multi-step atomic registration:
+    // Step A: Insert into master orders registry
     auto [it, inserted] = orders.emplace(id, std::move(workingOrder));
     if (!inserted) {
         return false;
     }
 
+    // Step B: Insert into DEPQ dispatch heap
+    try {
+        dispatchHeap.insert(dispatchEntry);
+    } catch (...) {
+        orders.erase(it);
+        return false;
+    }
+
+    // Step C: Enqueue into target FIFO priority lane
     try {
         Queue<std::string>& lane = getQueueForPriority(it->second.getPriority());
         lane.enqueue(id);
     } catch (...) {
-        // Rollback registry insertion on queue allocation failure
+        // Rollback earlier registrations: remove from DEPQ and master registry
+        dispatchHeap.removeIf([&id](const DispatchEntry& e) {
+            return e.orderId == id;
+        });
         orders.erase(it);
         return false;
     }
@@ -161,7 +202,150 @@ bool OrderManager::submitOrder(const Order& order)
 }
 
 // ---------------------------------------------------------------------------
-// Order Processing Loop (Two-Phase Commit with Compensating Rollback)
+// Shared Order Fulfillment Engine (Two-Phase Commit with Compensating Rollback)
+// ---------------------------------------------------------------------------
+
+bool OrderManager::executeOrderFulfillment(Order& order)
+{
+    // Transition from Pending to Processing
+    if (!order.setStatus(OrderStatus::Processing)) {
+        return false;
+    }
+
+    // -----------------------------------------------------------------
+    // Phase 1: Cumulative Demand Aggregation & Preflight Stock Check
+    // Retain first-seen unique SKU order
+    // -----------------------------------------------------------------
+    std::vector<std::string> uniqueSkus;
+    std::unordered_map<std::string, std::int64_t> cumulativeDemand;
+    bool overflowDetected = false;
+
+    for (const auto& item : order.getItems()) {
+        if (cumulativeDemand.find(item.productId) == cumulativeDemand.end()) {
+            uniqueSkus.push_back(item.productId);
+            cumulativeDemand[item.productId] = 0;
+        }
+
+        if (cumulativeDemand[item.productId] >
+            static_cast<std::int64_t>(std::numeric_limits<int>::max()) - item.quantity) {
+            overflowDetected = true;
+            break;
+        }
+
+        cumulativeDemand[item.productId] += item.quantity;
+        if (cumulativeDemand[item.productId] > std::numeric_limits<int>::max()) {
+            overflowDetected = true;
+            break;
+        }
+    }
+
+    if (overflowDetected) {
+        order.setStatus(OrderStatus::Failed);
+        order.setFailureReason("Quantity overflow in cumulative demand calculation");
+        return true;
+    }
+
+    // Validate stock availability for all unique SKUs
+    bool preflightPassed = true;
+    std::string failureDetail;
+
+    for (const auto& sku : uniqueSkus) {
+        Product* p = inventoryManager.findProduct(sku);
+        if (p == nullptr) {
+            preflightPassed = false;
+            failureDetail = "Product not found in catalog: " + sku;
+            break;
+        }
+
+        std::int64_t required = cumulativeDemand[sku];
+        int available = p->getQuantity();
+        if (static_cast<std::int64_t>(available) < required) {
+            preflightPassed = false;
+            failureDetail = "Insufficient stock for SKU " + sku +
+                            ": required " + std::to_string(required) +
+                            ", available " + std::to_string(available);
+            break;
+        }
+    }
+
+    if (!preflightPassed) {
+        order.setStatus(OrderStatus::Failed);
+        order.setFailureReason(failureDetail);
+        return true; // Preflight failed: zero inventory touched
+    }
+
+    // -----------------------------------------------------------------
+    // Phase 2: Mutation Planning & Execution in First-Seen Order
+    // -----------------------------------------------------------------
+    struct StockMutation
+    {
+        std::string sku;
+        int originalQty;
+        int targetQty;
+    };
+
+    std::vector<StockMutation> plan;
+    plan.reserve(uniqueSkus.size());
+
+    for (const auto& sku : uniqueSkus) {
+        Product* p = inventoryManager.findProduct(sku);
+        int orig = p->getQuantity();
+        int target = orig - static_cast<int>(cumulativeDemand[sku]);
+        plan.push_back({sku, orig, target});
+    }
+
+    std::size_t appliedCount = 0;
+    bool mutationFailed = false;
+    std::string failedSku;
+
+    for (const auto& step : plan) {
+        if (preMutationHook) {
+            preMutationHook(step.sku); // Test seam allows deterministic sabotage
+        }
+
+        if (!inventoryManager.updateProductQuantity(step.sku, step.targetQty)) {
+            mutationFailed = true;
+            failedSku = step.sku;
+            break;
+        }
+        ++appliedCount;
+    }
+
+    if (!mutationFailed) {
+        order.setStatus(OrderStatus::Completed);
+        return true;
+    }
+
+    // -----------------------------------------------------------------
+    // Phase 3: Compensating Rollback of Applied Deductions
+    // -----------------------------------------------------------------
+    bool rollbackFailed = false;
+    std::string rollbackFailedSku;
+
+    for (std::size_t i = appliedCount; i > 0; --i) {
+        const auto& step = plan[i - 1];
+        if (!inventoryManager.updateProductQuantity(step.sku, step.originalQty)) {
+            rollbackFailed = true;
+            rollbackFailedSku = step.sku;
+        }
+    }
+
+    order.setStatus(OrderStatus::Failed);
+    if (rollbackFailed) {
+        order.setFailureReason(
+            "CRITICAL: Partial rollback failure on SKU " + rollbackFailedSku +
+            "; inventory inconsistent");
+    } else {
+        order.setFailureReason(
+            "Inventory update mutation failed on SKU " + failedSku +
+            "; prior deductions successfully rolled back");
+    }
+
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Standard FIFO Order Processing Loop
 // ---------------------------------------------------------------------------
 
 bool OrderManager::processNextOrder()
@@ -170,151 +354,15 @@ bool OrderManager::processNextOrder()
     while (selectNextPendingOrderId(orderId)) {
         auto it = orders.find(orderId);
         if (it == orders.end()) {
-            continue;
+            continue; // Stale or unregistered entry, safely discard
         }
 
         Order& order = it->second;
-
-        // Lazy cancellation: skipped during dequeue
-        if (order.getStatus() == OrderStatus::Cancelled) {
-            continue;
+        if (order.getStatus() != OrderStatus::Pending) {
+            continue; // Lazily skip already-processed, failed, or cancelled orders
         }
 
-        // Transition from Pending to Processing
-        if (!order.setStatus(OrderStatus::Processing)) {
-            continue;
-        }
-
-        // -------------------------------------------------------------
-        // Phase 1: Cumulative Demand Aggregation & Preflight Stock Check
-        // Retain first-seen unique SKU order!
-        // -------------------------------------------------------------
-        std::vector<std::string> uniqueSkus;
-        std::unordered_map<std::string, std::int64_t> cumulativeDemand;
-        bool overflowDetected = false;
-
-        for (const auto& item : order.getItems()) {
-            if (cumulativeDemand.find(item.productId) == cumulativeDemand.end()) {
-                uniqueSkus.push_back(item.productId);
-                cumulativeDemand[item.productId] = 0;
-            }
-
-            if (cumulativeDemand[item.productId] >
-                static_cast<std::int64_t>(std::numeric_limits<int>::max()) - item.quantity) {
-                overflowDetected = true;
-                break;
-            }
-
-            cumulativeDemand[item.productId] += item.quantity;
-            if (cumulativeDemand[item.productId] > std::numeric_limits<int>::max()) {
-                overflowDetected = true;
-                break;
-            }
-        }
-
-        if (overflowDetected) {
-            order.setStatus(OrderStatus::Failed);
-            order.setFailureReason("Quantity overflow in cumulative demand calculation");
-            return true;
-        }
-
-        // Validate stock availability for all unique SKUs
-        bool preflightPassed = true;
-        std::string failureDetail;
-
-        for (const auto& sku : uniqueSkus) {
-            Product* p = inventoryManager.findProduct(sku);
-            if (p == nullptr) {
-                preflightPassed = false;
-                failureDetail = "Product not found in catalog: " + sku;
-                break;
-            }
-
-            std::int64_t required = cumulativeDemand[sku];
-            int available = p->getQuantity();
-            if (static_cast<std::int64_t>(available) < required) {
-                preflightPassed = false;
-                failureDetail = "Insufficient stock for SKU " + sku +
-                                ": required " + std::to_string(required) +
-                                ", available " + std::to_string(available);
-                break;
-            }
-        }
-
-        if (!preflightPassed) {
-            order.setStatus(OrderStatus::Failed);
-            order.setFailureReason(failureDetail);
-            return true; // Preflight failed: zero inventory touched
-        }
-
-        // -------------------------------------------------------------
-        // Phase 2: Mutation Planning & Execution in First-Seen Order
-        // -------------------------------------------------------------
-        struct StockMutation
-        {
-            std::string sku;
-            int originalQty;
-            int targetQty;
-        };
-
-        std::vector<StockMutation> plan;
-        plan.reserve(uniqueSkus.size());
-
-        for (const auto& sku : uniqueSkus) {
-            Product* p = inventoryManager.findProduct(sku);
-            int orig = p->getQuantity();
-            int target = orig - static_cast<int>(cumulativeDemand[sku]);
-            plan.push_back({sku, orig, target});
-        }
-
-        std::size_t appliedCount = 0;
-        bool mutationFailed = false;
-        std::string failedSku;
-
-        for (const auto& step : plan) {
-            if (preMutationHook) {
-                preMutationHook(step.sku); // Test seam allows deterministic sabotage
-            }
-
-            if (!inventoryManager.updateProductQuantity(step.sku, step.targetQty)) {
-                mutationFailed = true;
-                failedSku = step.sku;
-                break;
-            }
-            ++appliedCount;
-        }
-
-        if (!mutationFailed) {
-            order.setStatus(OrderStatus::Completed);
-            return true;
-        }
-
-        // -------------------------------------------------------------
-        // Phase 3: Compensating Rollback of Applied Deductions
-        // -------------------------------------------------------------
-        bool rollbackFailed = false;
-        std::string rollbackFailedSku;
-
-        for (std::size_t i = appliedCount; i > 0; --i) {
-            const auto& step = plan[i - 1];
-            if (!inventoryManager.updateProductQuantity(step.sku, step.originalQty)) {
-                rollbackFailed = true;
-                rollbackFailedSku = step.sku;
-            }
-        }
-
-        order.setStatus(OrderStatus::Failed);
-        if (rollbackFailed) {
-            order.setFailureReason(
-                "CRITICAL: Partial rollback failure on SKU " + rollbackFailedSku +
-                "; inventory inconsistent");
-        } else {
-            order.setFailureReason(
-                "Inventory update mutation failed on SKU " + failedSku +
-                "; prior deductions successfully rolled back");
-        }
-
-        return true;
+        return executeOrderFulfillment(order);
     }
 
     return false; // No pending orders were available
@@ -327,6 +375,80 @@ std::size_t OrderManager::processAllPendingOrders()
         ++processed;
     }
     return processed;
+}
+
+// ---------------------------------------------------------------------------
+// DEPQ-based Dynamic Dispatch Operations
+// ---------------------------------------------------------------------------
+
+bool OrderManager::peekHighestPriorityOrder(std::string& outOrderId)
+{
+    DispatchEntry entry;
+    while (dispatchHeap.peekMax(entry)) {
+        auto it = orders.find(entry.orderId);
+        if (it == orders.end() || it->second.getStatus() != OrderStatus::Pending) {
+            // Lazily clean stale or non-pending entry at top of heap
+            dispatchHeap.extractMax(entry);
+            continue;
+        }
+        outOrderId = entry.orderId;
+        return true;
+    }
+    return false;
+}
+
+bool OrderManager::peekLowestPriorityOrder(std::string& outOrderId)
+{
+    DispatchEntry entry;
+    while (dispatchHeap.peekMin(entry)) {
+        auto it = orders.find(entry.orderId);
+        if (it == orders.end() || it->second.getStatus() != OrderStatus::Pending) {
+            // Lazily clean stale or non-pending entry at bottom of heap
+            dispatchHeap.extractMin(entry);
+            continue;
+        }
+        outOrderId = entry.orderId;
+        return true;
+    }
+    return false;
+}
+
+bool OrderManager::dispatchHighestPriorityOrder()
+{
+    DispatchEntry entry;
+    while (dispatchHeap.extractMax(entry)) {
+        auto it = orders.find(entry.orderId);
+        if (it == orders.end()) {
+            continue; // Safely discard missing registry reference
+        }
+
+        Order& order = it->second;
+        if (order.getStatus() != OrderStatus::Pending) {
+            continue; // Lazily skip already-fulfilled, failed, or cancelled orders
+        }
+
+        return executeOrderFulfillment(order);
+    }
+    return false;
+}
+
+bool OrderManager::dispatchLowestPriorityOrder()
+{
+    DispatchEntry entry;
+    while (dispatchHeap.extractMin(entry)) {
+        auto it = orders.find(entry.orderId);
+        if (it == orders.end()) {
+            continue; // Safely discard missing registry reference
+        }
+
+        Order& order = it->second;
+        if (order.getStatus() != OrderStatus::Pending) {
+            continue; // Lazily skip already-fulfilled, failed, or cancelled orders
+        }
+
+        return executeOrderFulfillment(order);
+    }
+    return false;
 }
 
 // ---------------------------------------------------------------------------

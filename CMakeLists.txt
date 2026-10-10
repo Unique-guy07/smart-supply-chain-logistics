@@ -69,3 +69,8 @@ add_test(NAME TestOrder COMMAND test_order)
 add_executable(test_order_manager tests/test_order_manager.cpp)
 target_link_libraries(test_order_manager PRIVATE inventory_core)
 add_test(NAME TestOrderManager COMMAND test_order_manager)
+
+add_executable(test_min_max_heap tests/test_min_max_heap.cpp)
+target_link_libraries(test_min_max_heap PRIVATE inventory_core)
+add_test(NAME TestMinMaxHeap COMMAND test_min_max_heap)
+

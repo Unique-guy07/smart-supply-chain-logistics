@@ -13,6 +13,11 @@ public:
     {
         om.preMutationHook = std::move(hook);
     }
+
+    static void setNextSequenceNumber(OrderManager& om, std::uint64_t seq)
+    {
+        om.nextSequenceNumber = seq;
+    }
 };
 
 // ---------------------------------------------------------------------------
@@ -303,6 +308,287 @@ void testLifecycleStateRestrictions()
     TEST_CHECK(om.getOrder("ORD-LIFECYCLE")->getStatus() == OrderStatus::Completed);
 }
 
+// ---------------------------------------------------------------------------
+// T9: M4B DEPQ Highest-Priority Dispatch
+// ---------------------------------------------------------------------------
+void testHighestPriorityDepqDispatch()
+{
+    InventoryManager im(50);
+    seedTestInventory(im);
+    OrderManager om(im);
+
+    Order oLow("ORD-LOW", "CUST-1", OrderPriority::Low);       oLow.addItem("SKU-001", 1);
+    Order oNorm("ORD-NORM", "CUST-1", OrderPriority::Normal);  oNorm.addItem("SKU-001", 1);
+    Order oHigh("ORD-HIGH", "CUST-1", OrderPriority::High);    oHigh.addItem("SKU-001", 1);
+    Order oUrg("ORD-URG", "CUST-1", OrderPriority::Urgent);    oUrg.addItem("SKU-001", 1);
+
+    om.submitOrder(oLow);
+    om.submitOrder(oNorm);
+    om.submitOrder(oHigh);
+    om.submitOrder(oUrg);
+
+    std::string peekId;
+    TEST_CHECK(om.peekHighestPriorityOrder(peekId));
+    TEST_CHECK(peekId == "ORD-URG");
+
+    // Dispatch highest priority: Urgent
+    TEST_CHECK(om.dispatchHighestPriorityOrder());
+    TEST_CHECK(om.getOrder("ORD-URG")->getStatus() == OrderStatus::Completed);
+
+    // Next highest is High
+    TEST_CHECK(om.peekHighestPriorityOrder(peekId));
+    TEST_CHECK(peekId == "ORD-HIGH");
+    TEST_CHECK(om.dispatchHighestPriorityOrder());
+    TEST_CHECK(om.getOrder("ORD-HIGH")->getStatus() == OrderStatus::Completed);
+
+    // Next highest is Normal
+    TEST_CHECK(om.peekHighestPriorityOrder(peekId));
+    TEST_CHECK(peekId == "ORD-NORM");
+    TEST_CHECK(om.dispatchHighestPriorityOrder());
+    TEST_CHECK(om.getOrder("ORD-NORM")->getStatus() == OrderStatus::Completed);
+
+    // Last is Low
+    TEST_CHECK(om.peekHighestPriorityOrder(peekId));
+    TEST_CHECK(peekId == "ORD-LOW");
+    TEST_CHECK(om.dispatchHighestPriorityOrder());
+    TEST_CHECK(om.getOrder("ORD-LOW")->getStatus() == OrderStatus::Completed);
+
+    // No more pending orders
+    TEST_CHECK(!om.peekHighestPriorityOrder(peekId));
+    TEST_CHECK(!om.dispatchHighestPriorityOrder());
+    TEST_CHECK(om.getPendingCount() == 0);
+    TEST_CHECK(om.getCompletedCount() == 4);
+}
+
+// ---------------------------------------------------------------------------
+// T10: M4B DEPQ Lowest-Priority Dispatch (Backfill / Economy)
+// ---------------------------------------------------------------------------
+void testLowestPriorityDepqDispatch()
+{
+    InventoryManager im(50);
+    seedTestInventory(im);
+    OrderManager om(im);
+
+    Order oUrg("ORD-U", "CUST-1", OrderPriority::Urgent);  oUrg.addItem("SKU-001", 1);
+    Order oHigh("ORD-H", "CUST-1", OrderPriority::High);   oHigh.addItem("SKU-001", 1);
+    Order oNorm("ORD-N", "CUST-1", OrderPriority::Normal); oNorm.addItem("SKU-001", 1);
+    Order oLow("ORD-L", "CUST-1", OrderPriority::Low);     oLow.addItem("SKU-001", 1);
+
+    om.submitOrder(oUrg);
+    om.submitOrder(oHigh);
+    om.submitOrder(oNorm);
+    om.submitOrder(oLow);
+
+    std::string peekId;
+    TEST_CHECK(om.peekLowestPriorityOrder(peekId));
+    TEST_CHECK(peekId == "ORD-L");
+
+    // Dispatch lowest priority: Low
+    TEST_CHECK(om.dispatchLowestPriorityOrder());
+    TEST_CHECK(om.getOrder("ORD-L")->getStatus() == OrderStatus::Completed);
+
+    // Next lowest is Normal
+    TEST_CHECK(om.peekLowestPriorityOrder(peekId));
+    TEST_CHECK(peekId == "ORD-N");
+    TEST_CHECK(om.dispatchLowestPriorityOrder());
+    TEST_CHECK(om.getOrder("ORD-N")->getStatus() == OrderStatus::Completed);
+
+    // Next lowest is High
+    TEST_CHECK(om.peekLowestPriorityOrder(peekId));
+    TEST_CHECK(peekId == "ORD-H");
+    TEST_CHECK(om.dispatchLowestPriorityOrder());
+    TEST_CHECK(om.getOrder("ORD-H")->getStatus() == OrderStatus::Completed);
+
+    // Last is Urgent
+    TEST_CHECK(om.peekLowestPriorityOrder(peekId));
+    TEST_CHECK(peekId == "ORD-U");
+    TEST_CHECK(om.dispatchLowestPriorityOrder());
+    TEST_CHECK(om.getOrder("ORD-U")->getStatus() == OrderStatus::Completed);
+
+    TEST_CHECK(!om.peekLowestPriorityOrder(peekId));
+    TEST_CHECK(!om.dispatchLowestPriorityOrder());
+}
+
+// ---------------------------------------------------------------------------
+// T11: Interleaved FIFO and DEPQ Dispatch Without Double-Fulfillment
+// ---------------------------------------------------------------------------
+void testInterleavingFifoAndDepqDispatch()
+{
+    InventoryManager im(50);
+    seedTestInventory(im); // SKU-001 has quantity 100
+    OrderManager om(im);
+
+    Order u1("U1", "C", OrderPriority::Urgent); u1.addItem("SKU-001", 10);
+    Order h1("H1", "C", OrderPriority::High);   h1.addItem("SKU-001", 10);
+    Order n1("N1", "C", OrderPriority::Normal); n1.addItem("SKU-001", 10);
+    Order l1("L1", "C", OrderPriority::Low);    l1.addItem("SKU-001", 10);
+
+    om.submitOrder(u1);
+    om.submitOrder(h1);
+    om.submitOrder(n1);
+    om.submitOrder(l1);
+
+    // 1. Dispatch highest priority via DEPQ -> U1
+    TEST_CHECK(om.dispatchHighestPriorityOrder());
+    TEST_CHECK(om.getOrder("U1")->getStatus() == OrderStatus::Completed);
+    TEST_CHECK(im.findProduct("SKU-001")->getQuantity() == 90);
+
+    // 2. Dispatch next order via FIFO -> U1 is already Completed, so FIFO lazily skips U1 and processes H1!
+    TEST_CHECK(om.processNextOrder());
+    TEST_CHECK(om.getOrder("H1")->getStatus() == OrderStatus::Completed);
+    TEST_CHECK(im.findProduct("SKU-001")->getQuantity() == 80);
+
+    // 3. Dispatch lowest priority via DEPQ -> L1
+    TEST_CHECK(om.dispatchLowestPriorityOrder());
+    TEST_CHECK(om.getOrder("L1")->getStatus() == OrderStatus::Completed);
+    TEST_CHECK(im.findProduct("SKU-001")->getQuantity() == 70);
+
+    // 4. Dispatch next order via FIFO -> H1 is completed, so FIFO processes N1!
+    TEST_CHECK(om.processNextOrder());
+    TEST_CHECK(om.getOrder("N1")->getStatus() == OrderStatus::Completed);
+    TEST_CHECK(im.findProduct("SKU-001")->getQuantity() == 60);
+
+    // All orders are completed
+    TEST_CHECK(!om.processNextOrder());
+    TEST_CHECK(!om.dispatchHighestPriorityOrder());
+    TEST_CHECK(!om.dispatchLowestPriorityOrder());
+    TEST_CHECK(om.getPendingCount() == 0);
+    TEST_CHECK(om.getCompletedCount() == 4);
+
+    // Crucial invariant: Stock was deducted exactly 40 units (100 - 4*10 = 60). No double deductions!
+    TEST_CHECK(im.findProduct("SKU-001")->getQuantity() == 60);
+}
+
+// ---------------------------------------------------------------------------
+// T12: Cancellation and Stale Entries in Both Scheduling Paths
+// ---------------------------------------------------------------------------
+void testCancellationAndStaleEntriesInBothPaths()
+{
+    InventoryManager im(50);
+    seedTestInventory(im);
+    OrderManager om(im);
+
+    Order o1("O1", "C", OrderPriority::Urgent); o1.addItem("SKU-001", 5);
+    Order o2("O2", "C", OrderPriority::Urgent); o2.addItem("SKU-001", 5);
+    Order o3("O3", "C", OrderPriority::Low);    o3.addItem("SKU-001", 5);
+
+    om.submitOrder(o1);
+    om.submitOrder(o2);
+    om.submitOrder(o3);
+
+    // Cancel O1
+    TEST_CHECK(om.cancelOrder("O1"));
+    TEST_CHECK(om.getOrder("O1")->getStatus() == OrderStatus::Cancelled);
+
+    // DEPQ peek must lazily discard O1 and inspect O2
+    std::string peekId;
+    TEST_CHECK(om.peekHighestPriorityOrder(peekId));
+    TEST_CHECK(peekId == "O2");
+
+    // DEPQ dispatch must dispatch O2
+    TEST_CHECK(om.dispatchHighestPriorityOrder());
+    TEST_CHECK(om.getOrder("O2")->getStatus() == OrderStatus::Completed);
+
+    // Cancel O3
+    TEST_CHECK(om.cancelOrder("O3"));
+    TEST_CHECK(om.getOrder("O3")->getStatus() == OrderStatus::Cancelled);
+
+    // Now DEPQ min peek finds no eligible pending orders
+    TEST_CHECK(!om.peekLowestPriorityOrder(peekId));
+    TEST_CHECK(!om.dispatchLowestPriorityOrder());
+
+    // FIFO process finds no eligible pending orders (O1 and O2 already visited/skipped)
+    TEST_CHECK(!om.processNextOrder());
+    TEST_CHECK(om.getPendingCount() == 0);
+    TEST_CHECK(om.getCompletedCount() == 1);
+    TEST_CHECK(om.getCancelledCount() == 2);
+}
+
+// ---------------------------------------------------------------------------
+// T13: Tied Priorities Deterministic Ordering
+// ---------------------------------------------------------------------------
+void testTiedPrioritiesDeterministicOrdering()
+{
+    InventoryManager im(50);
+    seedTestInventory(im);
+    OrderManager om(im);
+
+    // Submit 3 orders with the SAME priority (Normal)
+    Order n1("N1", "C", OrderPriority::Normal); n1.addItem("SKU-001", 1);
+    Order n2("N2", "C", OrderPriority::Normal); n2.addItem("SKU-001", 1);
+    Order n3("N3", "C", OrderPriority::Normal); n3.addItem("SKU-001", 1);
+
+    om.submitOrder(n1);
+    om.submitOrder(n2);
+    om.submitOrder(n3);
+
+    // Deterministic tie-breaking: earlier sequence number (N1) comes out first in max-extraction
+    std::string peekId;
+    TEST_CHECK(om.peekHighestPriorityOrder(peekId));
+    TEST_CHECK(peekId == "N1");
+    TEST_CHECK(om.dispatchHighestPriorityOrder());
+    TEST_CHECK(om.getOrder("N1")->getStatus() == OrderStatus::Completed);
+
+    TEST_CHECK(om.peekHighestPriorityOrder(peekId));
+    TEST_CHECK(peekId == "N2");
+    TEST_CHECK(om.dispatchHighestPriorityOrder());
+    TEST_CHECK(om.getOrder("N2")->getStatus() == OrderStatus::Completed);
+
+    TEST_CHECK(om.peekHighestPriorityOrder(peekId));
+    TEST_CHECK(peekId == "N3");
+    TEST_CHECK(om.dispatchHighestPriorityOrder());
+    TEST_CHECK(om.getOrder("N3")->getStatus() == OrderStatus::Completed);
+
+    TEST_CHECK(!om.dispatchHighestPriorityOrder());
+}
+
+// ---------------------------------------------------------------------------
+// T14: Sequence Counter Boundary & Wrap Prevention Policy
+// ---------------------------------------------------------------------------
+void testSequenceCounterBoundaryPolicy()
+{
+    InventoryManager im(50);
+    seedTestInventory(im);
+    OrderManager om(im);
+
+    // 1. Submit Order 1 normally (Urgent priority)
+    Order ord1("ORD-SEQ-001", "CUST-1", OrderPriority::Urgent);
+    ord1.addItem("SKU-001", 1);
+    TEST_CHECK(om.submitOrder(ord1));
+
+    // 2. Set sequence counter to maximum boundary using test accessor
+    OrderManagerTestAccessor::setNextSequenceNumber(om, std::numeric_limits<std::uint64_t>::max());
+
+    // 3. Attempt to submit Order 2 while Order 1 is still Pending
+    // Must be rejected: counter cannot wrap or reuse numbers while live entries exist
+    Order ord2("ORD-SEQ-002", "CUST-2", OrderPriority::Urgent);
+    ord2.addItem("SKU-002", 1);
+    TEST_CHECK(!om.submitOrder(ord2));
+
+    // Confirm ord1 is still pending and can be dispatched cleanly
+    std::string highestId;
+    TEST_CHECK(om.peekHighestPriorityOrder(highestId));
+    TEST_CHECK(highestId == "ORD-SEQ-001");
+    TEST_CHECK(om.dispatchHighestPriorityOrder());
+
+    // Verify ord1 is completed, no live pending orders remain in om
+    const Order* stored1 = om.getOrder("ORD-SEQ-001");
+    TEST_CHECK(stored1 != nullptr);
+    TEST_CHECK(stored1->getStatus() == OrderStatus::Completed);
+
+    // 4. Now that no live pending orders remain, submitting ord2 should trigger safe reset
+    TEST_CHECK(om.submitOrder(ord2));
+
+    // Verify ord2 is scheduled, peekable, and dispatchable
+    TEST_CHECK(om.peekHighestPriorityOrder(highestId));
+    TEST_CHECK(highestId == "ORD-SEQ-002");
+    TEST_CHECK(om.dispatchHighestPriorityOrder());
+
+    const Order* stored2 = om.getOrder("ORD-SEQ-002");
+    TEST_CHECK(stored2 != nullptr);
+    TEST_CHECK(stored2->getStatus() == OrderStatus::Completed);
+}
+
 int main()
 {
     TEST_RUN(testSubmissionValidation);
@@ -313,5 +599,13 @@ int main()
     TEST_RUN(testDeterministicCompensatingRollback);
     TEST_RUN(testExactStockDepletion);
     TEST_RUN(testLifecycleStateRestrictions);
+    TEST_RUN(testHighestPriorityDepqDispatch);
+    TEST_RUN(testLowestPriorityDepqDispatch);
+    TEST_RUN(testInterleavingFifoAndDepqDispatch);
+    TEST_RUN(testCancellationAndStaleEntriesInBothPaths);
+    TEST_RUN(testTiedPrioritiesDeterministicOrdering);
+    TEST_RUN(testSequenceCounterBoundaryPolicy);
     TEST_REPORT();
 }
+
+
