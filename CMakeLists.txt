@@ -92,3 +92,7 @@ add_test(NAME TestFreightPricing COMMAND test_freight_pricing)
 add_executable(test_slotting tests/test_slotting.cpp)
 target_link_libraries(test_slotting PRIVATE inventory_core)
 add_test(NAME TestSlotting COMMAND test_slotting)
+
+add_executable(test_priority_task tests/test_priority_task.cpp)
+target_link_libraries(test_priority_task PRIVATE inventory_core)
+add_test(NAME TestPriorityTask COMMAND test_priority_task)
