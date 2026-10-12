@@ -27,6 +27,7 @@ add_library(inventory_core STATIC
     src/order/OrderManager.cpp
     src/order/ExpressionEvaluator.cpp
     src/order/FreightPricingEngine.cpp
+    src/task/TaskPriorityManager.cpp
 )
 target_include_directories(inventory_core PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
@@ -96,3 +97,7 @@ add_test(NAME TestSlotting COMMAND test_slotting)
 add_executable(test_priority_task tests/test_priority_task.cpp)
 target_link_libraries(test_priority_task PRIVATE inventory_core)
 add_test(NAME TestPriorityTask COMMAND test_priority_task)
+
+add_executable(test_task_priority_manager tests/test_task_priority_manager.cpp)
+target_link_libraries(test_task_priority_manager PRIVATE inventory_core)
+add_test(NAME TestTaskPriorityManager COMMAND test_task_priority_manager)
