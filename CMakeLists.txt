@@ -28,6 +28,7 @@ add_library(inventory_core STATIC
     src/order/ExpressionEvaluator.cpp
     src/order/FreightPricingEngine.cpp
     src/task/TaskPriorityManager.cpp
+    src/task/OperationalMetricsRanker.cpp
 )
 target_include_directories(inventory_core PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
@@ -101,3 +102,15 @@ add_test(NAME TestPriorityTask COMMAND test_priority_task)
 add_executable(test_task_priority_manager tests/test_task_priority_manager.cpp)
 target_link_libraries(test_task_priority_manager PRIVATE inventory_core)
 add_test(NAME TestTaskPriorityManager COMMAND test_task_priority_manager)
+
+add_executable(test_max_heap tests/test_max_heap.cpp)
+target_link_libraries(test_max_heap PRIVATE inventory_core)
+add_test(NAME TestMaxHeap COMMAND test_max_heap)
+
+add_executable(test_heap_sort tests/test_heap_sort.cpp)
+target_link_libraries(test_heap_sort PRIVATE inventory_core)
+add_test(NAME TestHeapSort COMMAND test_heap_sort)
+
+add_executable(test_worker_performance_ranker tests/test_worker_performance_ranker.cpp)
+target_link_libraries(test_worker_performance_ranker PRIVATE inventory_core)
+add_test(NAME TestWorkerPerformanceRanker COMMAND test_worker_performance_ranker)
