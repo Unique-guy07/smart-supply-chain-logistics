@@ -29,6 +29,7 @@ add_library(inventory_core STATIC
     src/order/FreightPricingEngine.cpp
     src/task/TaskPriorityManager.cpp
     src/task/OperationalMetricsRanker.cpp
+    src/task/DistributedTaskQueue.cpp
 )
 target_include_directories(inventory_core PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
@@ -114,3 +115,11 @@ add_test(NAME TestHeapSort COMMAND test_heap_sort)
 add_executable(test_worker_performance_ranker tests/test_worker_performance_ranker.cpp)
 target_link_libraries(test_worker_performance_ranker PRIVATE inventory_core)
 add_test(NAME TestWorkerPerformanceRanker COMMAND test_worker_performance_ranker)
+
+add_executable(test_binomial_heap tests/test_binomial_heap.cpp)
+target_link_libraries(test_binomial_heap PRIVATE inventory_core)
+add_test(NAME TestBinomialHeap COMMAND test_binomial_heap)
+
+add_executable(test_distributed_task_queue tests/test_distributed_task_queue.cpp)
+target_link_libraries(test_distributed_task_queue PRIVATE inventory_core)
+add_test(NAME TestDistributedTaskQueue COMMAND test_distributed_task_queue)
