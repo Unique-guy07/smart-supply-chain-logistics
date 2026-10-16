@@ -123,3 +123,7 @@ add_test(NAME TestBinomialHeap COMMAND test_binomial_heap)
 add_executable(test_distributed_task_queue tests/test_distributed_task_queue.cpp)
 target_link_libraries(test_distributed_task_queue PRIVATE inventory_core)
 add_test(NAME TestDistributedTaskQueue COMMAND test_distributed_task_queue)
+
+add_executable(test_fibonacci_heap tests/test_fibonacci_heap.cpp)
+target_link_libraries(test_fibonacci_heap PRIVATE inventory_core)
+add_test(NAME TestFibonacciHeap COMMAND test_fibonacci_heap)
