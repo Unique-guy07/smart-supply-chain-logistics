@@ -127,3 +127,7 @@ add_test(NAME TestDistributedTaskQueue COMMAND test_distributed_task_queue)
 add_executable(test_fibonacci_heap tests/test_fibonacci_heap.cpp)
 target_link_libraries(test_fibonacci_heap PRIVATE inventory_core)
 add_test(NAME TestFibonacciHeap COMMAND test_fibonacci_heap)
+
+add_executable(test_min_heap tests/test_min_heap.cpp)
+target_link_libraries(test_min_heap PRIVATE inventory_core)
+add_test(NAME TestMinHeap COMMAND test_min_heap)
