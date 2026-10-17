@@ -27,6 +27,7 @@ add_library(inventory_core STATIC
     src/order/OrderManager.cpp
     src/order/ExpressionEvaluator.cpp
     src/order/FreightPricingEngine.cpp
+    src/order/AuditCycle.cpp
     src/task/TaskPriorityManager.cpp
     src/task/OperationalMetricsRanker.cpp
     src/task/DistributedTaskQueue.cpp
@@ -131,3 +132,11 @@ add_test(NAME TestFibonacciHeap COMMAND test_fibonacci_heap)
 add_executable(test_min_heap tests/test_min_heap.cpp)
 target_link_libraries(test_min_heap PRIVATE inventory_core)
 add_test(NAME TestMinHeap COMMAND test_min_heap)
+
+add_executable(test_circular_linked_list tests/test_circular_linked_list.cpp)
+target_link_libraries(test_circular_linked_list PRIVATE inventory_core)
+add_test(NAME TestCircularLinkedList COMMAND test_circular_linked_list)
+
+add_executable(test_audit_cycle tests/test_audit_cycle.cpp)
+target_link_libraries(test_audit_cycle PRIVATE inventory_core)
+add_test(NAME TestAuditCycle COMMAND test_audit_cycle)
