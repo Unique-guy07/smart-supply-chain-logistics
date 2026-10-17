@@ -31,6 +31,7 @@ add_library(inventory_core STATIC
     src/task/TaskPriorityManager.cpp
     src/task/OperationalMetricsRanker.cpp
     src/task/DistributedTaskQueue.cpp
+    src/graph/DisjointSet.cpp
 )
 target_include_directories(inventory_core PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
@@ -140,3 +141,7 @@ add_test(NAME TestCircularLinkedList COMMAND test_circular_linked_list)
 add_executable(test_audit_cycle tests/test_audit_cycle.cpp)
 target_link_libraries(test_audit_cycle PRIVATE inventory_core)
 add_test(NAME TestAuditCycle COMMAND test_audit_cycle)
+
+add_executable(test_disjoint_set tests/test_disjoint_set.cpp)
+target_link_libraries(test_disjoint_set PRIVATE inventory_core)
+add_test(NAME TestDisjointSet COMMAND test_disjoint_set)
