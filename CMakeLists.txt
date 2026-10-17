@@ -33,6 +33,7 @@ add_library(inventory_core STATIC
     src/task/DistributedTaskQueue.cpp
     src/graph/DisjointSet.cpp
     src/graph/WarehouseGraph.cpp
+    src/graph/WaitForGraph.cpp
 )
 target_include_directories(inventory_core PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
@@ -150,3 +151,7 @@ add_test(NAME TestDisjointSet COMMAND test_disjoint_set)
 add_executable(test_warehouse_graph tests/test_warehouse_graph.cpp)
 target_link_libraries(test_warehouse_graph PRIVATE inventory_core)
 add_test(NAME TestWarehouseGraph COMMAND test_warehouse_graph)
+
+add_executable(test_deadlock tests/test_deadlock.cpp)
+target_link_libraries(test_deadlock PRIVATE inventory_core)
+add_test(NAME TestDeadlock COMMAND test_deadlock)

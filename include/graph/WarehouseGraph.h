@@ -1,7 +1,10 @@
 #pragma once
 
+#include "graph/DisjointSet.h"
 #include "order/Queue.h"
 #include "order/Stack.h"
+#include "task/FibonacciHeap.h"
+#include "task/MinHeap.h"
 
 #include <cstddef>
 #include <limits>
@@ -45,6 +48,39 @@ struct BfsResult
     std::size_t hopCount{0};
     std::vector<std::size_t> path;   ///< Vertex indices in forward order: [source, ..., destination]
     std::vector<std::string> route;  ///< Vertex identifiers in forward order: [sourceId, ..., destId]
+};
+
+/// Result structure for Dijkstra weighted shortest-path routing.
+struct DijkstraResult
+{
+    bool hasPath{false};
+    double totalCost{0.0};
+    std::vector<std::size_t> path;   ///< Vertex indices in forward order: [source, ..., destination]
+    std::vector<std::string> route;  ///< Vertex identifiers in forward order: [sourceId, ..., destId]
+
+    bool operator==(const DijkstraResult& other) const noexcept
+    {
+        return hasPath == other.hasPath && totalCost == other.totalCost
+            && path == other.path && route == other.route;
+    }
+};
+
+/// Result structure for Minimum Spanning Forest (MSF) infrastructure planning.
+struct SpanningForestResult
+{
+    std::vector<InfrastructureEdge> edges;
+    double totalCost{0.0};
+    std::size_t componentCount{0};
+    bool isSingleSpanningTree{false};
+    std::vector<std::size_t> componentIds;
+
+    bool operator==(const SpanningForestResult& other) const noexcept
+    {
+        return edges == other.edges && totalCost == other.totalCost
+            && componentCount == other.componentCount
+            && isSingleSpanningTree == other.isSingleSpanningTree
+            && componentIds == other.componentIds;
+    }
 };
 
 /// Warehouse navigation graph storing spatial topology via adjacency lists.
@@ -191,6 +227,29 @@ public:
     /// Overload for BFS routing using string location identifiers.
     /// @throws std::out_of_range if sourceId or destId is not found.
     [[nodiscard]] BfsResult findShortestPathBfs(const std::string& sourceId, const std::string& destId) const;
+
+    // --- Dijkstra Shortest-Path Routing ---
+
+    /// Calculates the minimum-cost route from source to destination using Dijkstra's algorithm.
+    /// Utilizes custom FibonacciHeap with decrease-key support for O(E + V log V) routing.
+    /// @throws std::out_of_range if source or destination is out of bounds.
+    /// @throws std::invalid_argument if negative or non-finite edge weights are encountered.
+    [[nodiscard]] DijkstraResult findShortestPathDijkstra(std::size_t source, std::size_t destination) const;
+
+    /// Overload for Dijkstra routing using string location identifiers.
+    /// @throws std::out_of_range if sourceId or destId is not found.
+    /// @throws std::invalid_argument if negative or non-finite edge weights are encountered.
+    [[nodiscard]] DijkstraResult findShortestPathDijkstra(const std::string& sourceId, const std::string& destId) const;
+
+    // --- Infrastructure Spanning Planning (Prim & Kruskal) ---
+
+    /// Computes the Minimum Spanning Forest of physical infrastructure candidate links using Prim's algorithm.
+    /// Utilizes custom MinHeap and operates exclusively on candidate installation costs.
+    [[nodiscard]] SpanningForestResult computeMstPrim() const;
+
+    /// Computes the Minimum Spanning Forest of physical infrastructure candidate links using Kruskal's algorithm.
+    /// Utilizes custom DisjointSet for cycle prevention and operates exclusively on candidate installation costs.
+    [[nodiscard]] SpanningForestResult computeMstKruskal() const;
 
     // --- Static Predecessor Reconstruction Helper ---
 

@@ -380,3 +380,339 @@ BfsResult WarehouseGraph::findShortestPathBfs(const std::string& sourceId, const
 {
     return findShortestPathBfs(getVertexIndex(sourceId), getVertexIndex(destId));
 }
+
+DijkstraResult WarehouseGraph::findShortestPathDijkstra(std::size_t source, std::size_t destination) const
+{
+    validateIndex(source);
+    validateIndex(destination);
+
+    if (source == destination) {
+        return DijkstraResult{
+            .hasPath = true,
+            .totalCost = 0.0,
+            .path = {source},
+            .route = {getVertexIdentifier(source)}
+        };
+    }
+
+    const std::size_t n = vertices.size();
+    std::vector<double> dist(n, std::numeric_limits<double>::infinity());
+    std::vector<std::size_t> pred(n, NO_PREDECESSOR);
+    std::vector<bool> settled(n, false);
+
+    struct DijkstraNode
+    {
+        std::size_t vertex{0};
+        double distance{0.0};
+    };
+
+    struct DijkstraNodeComparator
+    {
+        bool operator()(const DijkstraNode& a, const DijkstraNode& b) const noexcept
+        {
+            if (b.distance != a.distance) {
+                return b.distance < a.distance;
+            }
+            return b.vertex < a.vertex;
+        }
+    };
+
+    using HeapType = FibonacciHeap<DijkstraNode, DijkstraNodeComparator>;
+    HeapType heap;
+    std::vector<HeapType::NodeHandle> handles(n);
+
+    dist[source] = 0.0;
+    handles[source] = heap.insert({source, 0.0});
+
+    while (!heap.isEmpty()) {
+        DijkstraNode current;
+        heap.extract(current);
+        const std::size_t u = current.vertex;
+
+        if (settled[u]) {
+            continue;
+        }
+        settled[u] = true;
+
+        if (u == destination) {
+            break;
+        }
+
+        if (std::isinf(dist[u])) {
+            break;
+        }
+
+        for (const auto& edge : adj[u]) {
+            if (edge.navigationWeight < 0.0 || !std::isfinite(edge.navigationWeight)) {
+                throw std::invalid_argument("WarehouseGraph: negative or non-finite edge weight encountered in Dijkstra");
+            }
+
+            const std::size_t v = edge.to;
+            if (settled[v]) {
+                continue;
+            }
+
+            const double newDist = dist[u] + edge.navigationWeight;
+            if (!std::isfinite(newDist)) {
+                continue;
+            }
+
+            if (newDist < dist[v]) {
+                dist[v] = newDist;
+                pred[v] = u;
+                if (!handles[v].isValid()) {
+                    handles[v] = heap.insert({v, newDist});
+                } else {
+                    heap.decreaseKey(handles[v], {v, newDist});
+                }
+            }
+        }
+    }
+
+    if (!settled[destination]) {
+        return DijkstraResult{
+            .hasPath = false,
+            .totalCost = 0.0,
+            .path = {},
+            .route = {}
+        };
+    }
+
+    std::vector<std::size_t> path = reconstructPath(source, destination, pred, n);
+    std::vector<std::string> route;
+    route.reserve(path.size());
+    for (std::size_t node : path) {
+        route.push_back(getVertexIdentifier(node));
+    }
+
+    return DijkstraResult{
+        .hasPath = true,
+        .totalCost = dist[destination],
+        .path = std::move(path),
+        .route = std::move(route)
+    };
+}
+
+DijkstraResult WarehouseGraph::findShortestPathDijkstra(const std::string& sourceId, const std::string& destId) const
+{
+    return findShortestPathDijkstra(getVertexIndex(sourceId), getVertexIndex(destId));
+}
+
+SpanningForestResult WarehouseGraph::computeMstPrim() const
+{
+    const std::size_t n = vertices.size();
+    if (n == 0) {
+        return SpanningForestResult{
+            .edges = {},
+            .totalCost = 0.0,
+            .componentCount = 0,
+            .isSingleSpanningTree = false,
+            .componentIds = {}
+        };
+    }
+
+    struct PrimAdjEdge
+    {
+        std::size_t to{0};
+        double cost{0.0};
+    };
+
+    std::vector<std::vector<PrimAdjEdge>> infraAdj(n);
+    for (const auto& link : infrastructureLinks) {
+        infraAdj[link.u].push_back({link.v, link.installationCost});
+        infraAdj[link.v].push_back({link.u, link.installationCost});
+    }
+
+    for (std::size_t i = 0; i < n; ++i) {
+        std::sort(infraAdj[i].begin(), infraAdj[i].end(), [](const PrimAdjEdge& a, const PrimAdjEdge& b) {
+            if (a.cost != b.cost) {
+                return a.cost < b.cost;
+            }
+            return a.to < b.to;
+        });
+    }
+
+    struct PrimCandidateEdge
+    {
+        std::size_t u{0};
+        std::size_t v{0};
+        double cost{0.0};
+    };
+
+    struct PrimCandidateEdgeGreater
+    {
+        bool operator()(const PrimCandidateEdge& a, const PrimCandidateEdge& b) const noexcept
+        {
+            if (a.cost != b.cost) {
+                return a.cost > b.cost;
+            }
+            std::size_t aMin = std::min(a.u, a.v);
+            std::size_t aMax = std::max(a.u, a.v);
+            std::size_t bMin = std::min(b.u, b.v);
+            std::size_t bMax = std::max(b.u, b.v);
+            if (aMin != bMin) {
+                return aMin > bMin;
+            }
+            return aMax > bMax;
+        }
+    };
+
+    std::vector<bool> inTree(n, false);
+    std::vector<InfrastructureEdge> selectedEdges;
+    selectedEdges.reserve(n > 1 ? n - 1 : 0);
+    double totalCost = 0.0;
+    std::size_t componentCount = 0;
+    std::vector<std::size_t> componentIds(n, 0);
+
+    for (std::size_t s = 0; s < n; ++s) {
+        if (inTree[s]) {
+            continue;
+        }
+
+        const std::size_t currCompId = componentCount++;
+        inTree[s] = true;
+        componentIds[s] = currCompId;
+
+        MinHeap<PrimCandidateEdge, PrimCandidateEdgeGreater> heap;
+        for (const auto& edge : infraAdj[s]) {
+            if (!inTree[edge.to]) {
+                heap.insert({s, edge.to, edge.cost});
+            }
+        }
+
+        while (!heap.isEmpty()) {
+            PrimCandidateEdge cand;
+            heap.extractMin(cand);
+
+            if (inTree[cand.v]) {
+                continue;
+            }
+
+            inTree[cand.v] = true;
+            componentIds[cand.v] = currCompId;
+
+            const double candidateTotal = totalCost + cand.cost;
+            if (!std::isfinite(candidateTotal)) {
+                throw std::overflow_error("WarehouseGraph: MST aggregate installation cost exceeded finite floating-point range");
+            }
+
+            std::size_t normU = std::min(cand.u, cand.v);
+            std::size_t normV = std::max(cand.u, cand.v);
+            selectedEdges.push_back({normU, normV, cand.cost});
+            totalCost = candidateTotal;
+
+            for (const auto& nextEdge : infraAdj[cand.v]) {
+                if (!inTree[nextEdge.to]) {
+                    heap.insert({cand.v, nextEdge.to, nextEdge.cost});
+                }
+            }
+        }
+    }
+
+    std::sort(selectedEdges.begin(), selectedEdges.end(), [](const InfrastructureEdge& a, const InfrastructureEdge& b) {
+        if (a.installationCost != b.installationCost) {
+            return a.installationCost < b.installationCost;
+        }
+        if (a.u != b.u) {
+            return a.u < b.u;
+        }
+        return a.v < b.v;
+    });
+
+    const bool isSingleTree = (n > 0 && componentCount == 1);
+
+    return SpanningForestResult{
+        .edges = std::move(selectedEdges),
+        .totalCost = totalCost,
+        .componentCount = componentCount,
+        .isSingleSpanningTree = isSingleTree,
+        .componentIds = std::move(componentIds)
+    };
+}
+
+SpanningForestResult WarehouseGraph::computeMstKruskal() const
+{
+    const std::size_t n = vertices.size();
+    if (n == 0) {
+        return SpanningForestResult{
+            .edges = {},
+            .totalCost = 0.0,
+            .componentCount = 0,
+            .isSingleSpanningTree = false,
+            .componentIds = {}
+        };
+    }
+
+    std::vector<InfrastructureEdge> sortedEdges = infrastructureLinks;
+    std::sort(sortedEdges.begin(), sortedEdges.end(), [](const InfrastructureEdge& a, const InfrastructureEdge& b) {
+        if (a.installationCost != b.installationCost) {
+            return a.installationCost < b.installationCost;
+        }
+        std::size_t aMin = std::min(a.u, a.v);
+        std::size_t aMax = std::max(a.u, a.v);
+        std::size_t bMin = std::min(b.u, b.v);
+        std::size_t bMax = std::max(b.u, b.v);
+        if (aMin != bMin) {
+            return aMin < bMin;
+        }
+        return aMax < bMax;
+    });
+
+    DisjointSet ds(n);
+    std::vector<InfrastructureEdge> selectedEdges;
+    selectedEdges.reserve(n > 1 ? n - 1 : 0);
+    double totalCost = 0.0;
+
+    for (const auto& edge : sortedEdges) {
+        if (ds.unionSets(edge.u, edge.v)) {
+            const double candidateTotal = totalCost + edge.installationCost;
+            if (!std::isfinite(candidateTotal)) {
+                throw std::overflow_error("WarehouseGraph: MST aggregate installation cost exceeded finite floating-point range");
+            }
+
+            std::size_t normU = std::min(edge.u, edge.v);
+            std::size_t normV = std::max(edge.u, edge.v);
+            selectedEdges.push_back({normU, normV, edge.installationCost});
+            totalCost = candidateTotal;
+            if (selectedEdges.size() == n - 1) {
+                break;
+            }
+        }
+    }
+
+    std::sort(selectedEdges.begin(), selectedEdges.end(), [](const InfrastructureEdge& a, const InfrastructureEdge& b) {
+        if (a.installationCost != b.installationCost) {
+            return a.installationCost < b.installationCost;
+        }
+        if (a.u != b.u) {
+            return a.u < b.u;
+        }
+        return a.v < b.v;
+    });
+
+    const std::size_t componentCount = ds.getSetCount();
+    const bool isSingleTree = (n > 0 && componentCount == 1);
+
+    std::unordered_map<std::size_t, std::size_t> rootToComponent;
+    std::vector<std::size_t> componentIds(n);
+    std::size_t nextCompId = 0;
+    for (std::size_t i = 0; i < n; ++i) {
+        std::size_t root = ds.find(i);
+        auto it = rootToComponent.find(root);
+        if (it == rootToComponent.end()) {
+            rootToComponent[root] = nextCompId;
+            componentIds[i] = nextCompId;
+            ++nextCompId;
+        } else {
+            componentIds[i] = it->second;
+        }
+    }
+
+    return SpanningForestResult{
+        .edges = std::move(selectedEdges),
+        .totalCost = totalCost,
+        .componentCount = componentCount,
+        .isSingleSpanningTree = isSingleTree,
+        .componentIds = std::move(componentIds)
+    };
+}
