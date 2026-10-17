@@ -143,19 +143,27 @@ bool TaskPriorityManager::dispatchHighestPriority(PriorityTask& outTask)
             PriorityTask("placeholder", TaskCategory::Pick, TaskPriority::Low, "DC_0", 0),
             0
         );
-        if (!taskHeap.extractMax(entry)) {
+        if (!taskHeap.peekMax(entry)) {
             break;
         }
 
         if (isEntryStale(entry)) {
-            continue; // Discard stale tombstone
+            taskHeap.extractMax(entry); // Discard stale tombstone
+            continue;
         }
 
         auto it = registry.find(entry.task.getTaskId());
         TaskRecord& record = it->second;
+
+        // Step 1: Assign to caller's output parameter first.
+        // If copying the task throws (e.g. std::bad_alloc on string allocation),
+        // the task remains untouched in taskHeap and in the registry as Active.
+        outTask = record.task;
+
+        // Step 2: Commit state changes once assignment has succeeded.
         record.state = TaskState::Dispatched;
         --activeCount;
-        outTask = record.task;
+        taskHeap.extractMax(entry);
         return true;
     }
     return false;
@@ -168,19 +176,27 @@ bool TaskPriorityManager::dispatchLowestPriority(PriorityTask& outTask)
             PriorityTask("placeholder", TaskCategory::Pick, TaskPriority::Low, "DC_0", 0),
             0
         );
-        if (!taskHeap.extractMin(entry)) {
+        if (!taskHeap.peekMin(entry)) {
             break;
         }
 
         if (isEntryStale(entry)) {
-            continue; // Discard stale tombstone
+            taskHeap.extractMin(entry); // Discard stale tombstone
+            continue;
         }
 
         auto it = registry.find(entry.task.getTaskId());
         TaskRecord& record = it->second;
+
+        // Step 1: Assign to caller's output parameter first.
+        // If copying the task throws (e.g. std::bad_alloc on string allocation),
+        // the task remains untouched in taskHeap and in the registry as Active.
+        outTask = record.task;
+
+        // Step 2: Commit state changes once assignment has succeeded.
         record.state = TaskState::Dispatched;
         --activeCount;
-        outTask = record.task;
+        taskHeap.extractMin(entry);
         return true;
     }
     return false;

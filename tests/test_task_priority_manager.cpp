@@ -1,7 +1,106 @@
 #include "test_utils.h"
 #include "task/TaskPriorityManager.h"
+#include <new>
 #include <string>
 #include <vector>
+
+// ===========================================================================
+// Deterministic Failure-Injection Infrastructure (MSVC / C++20 targeted)
+//
+// Environmental & Implementation Assumptions:
+// 1. Under MSVC C++20 standard library (<string>), strings with length <= 15
+//    characters utilize the Small String Optimization (SSO) and perform 0 dynamic
+//    heap allocations. Strings with length >= 16 characters allocate memory via
+//    global operator new with a capacity request >= 32 bytes (typically 48 bytes).
+// 2. PriorityTask is a concrete, non-virtual type with compiler-generated
+//    value-copy semantics. The only throwing operation during output assignment
+//    (outTask = record.task) is dynamic memory allocation for non-SSO string members.
+// 3. During dispatchHighestPriority / dispatchLowestPriority on an active task
+//    with a 41-char taskId:
+//      - Allocation #1 (size >= 32): peekMax(entry) / peekMin(entry) copies the
+//        task into the local 'entry' variable.
+//      - Allocation #2 (size >= 32): outTask = record.task copies the task into
+//        the caller's output parameter.
+//      - Commit phase: record.state transition, activeCount decrement, and
+//        taskHeap.extractMax(entry) execute via move assignment and are strictly noexcept.
+// 4. ScopedAllocationFailureGuard provides RAII cleanup: on any exit path (normal,
+//    expected bad_alloc, or unexpected exception), the failure countdown is restored
+//    to -1 so no failure state leaks into other tests.
+// 5. g_largeAllocAttempts tracks the exact count of large allocation attempts.
+//    Asserting g_largeAllocAttempts == 2 guarantees that Allocation #1 (in peekMax)
+//    succeeded and Allocation #2 (in outTask = record.task) was the exact failure point,
+//    preventing false-positive test passes if an exception occurs at the wrong stage.
+// ===========================================================================
+
+static int g_largeAllocAttempts = 0;
+static int g_largeAllocCountdown = -1;
+
+void* operator new(std::size_t size)
+{
+    if (size >= 32) {
+        ++g_largeAllocAttempts;
+        if (g_largeAllocCountdown > 0) {
+            --g_largeAllocCountdown;
+            if (g_largeAllocCountdown == 0) {
+                throw std::bad_alloc();
+            }
+        }
+    }
+    void* ptr = std::malloc(size);
+    if (!ptr) {
+        throw std::bad_alloc();
+    }
+    return ptr;
+}
+
+void* operator new[](std::size_t size)
+{
+    return operator new(size);
+}
+
+void operator delete(void* ptr) noexcept
+{
+    std::free(ptr);
+}
+
+void operator delete[](void* ptr) noexcept
+{
+    std::free(ptr);
+}
+
+void operator delete(void* ptr, std::size_t) noexcept
+{
+    std::free(ptr);
+}
+
+void operator delete[](void* ptr, std::size_t) noexcept
+{
+    std::free(ptr);
+}
+
+/// Scoped RAII guard managing deterministic allocation failure injection.
+/// Guarantees that failure injection is automatically disarmed on every exit path
+/// (normal return, expected exception, or unexpected exception) with zero allocations
+/// and a noexcept destructor.
+class ScopedAllocationFailureGuard
+{
+public:
+    explicit ScopedAllocationFailureGuard(int countdown) noexcept
+    {
+        g_largeAllocAttempts = 0;
+        g_largeAllocCountdown = countdown;
+    }
+
+    ~ScopedAllocationFailureGuard() noexcept
+    {
+        g_largeAllocCountdown = -1;
+    }
+
+    ScopedAllocationFailureGuard(const ScopedAllocationFailureGuard&) = delete;
+    ScopedAllocationFailureGuard& operator=(const ScopedAllocationFailureGuard&) = delete;
+    ScopedAllocationFailureGuard(ScopedAllocationFailureGuard&&) = delete;
+    ScopedAllocationFailureGuard& operator=(ScopedAllocationFailureGuard&&) = delete;
+};
 
 // ---------------------------------------------------------------------------
 // T1: Empty Manager Operations
@@ -395,6 +494,155 @@ void testClearSemanticsAndIdReuse()
 }
 
 // ---------------------------------------------------------------------------
+// T11: Exception-Safe Task Dispatch (Strong Exception Guarantee)
+// ---------------------------------------------------------------------------
+void testDispatchExceptionSafety()
+{
+    // Part 1: Highest-priority dispatch exception safety during output assignment
+    {
+        TaskPriorityManager mgr;
+        const std::string longId = "TASK_LONG_ID_HIGHEST_EXCEPTION_SAFETY_001";
+        TEST_CHECK(mgr.registerTask(longId, TaskCategory::Emergency, TaskPriority::Critical, "DC1"));
+        TEST_CHECK(mgr.getActiveCount() == 1);
+
+        PriorityTask outTask("placeholder", TaskCategory::Pick, TaskPriority::Low, "DC_0", 0);
+
+        bool badAllocThrown = false;
+        bool unexpectedThrown = false;
+        {
+            // Large alloc 1 is peekMax internal entry; large alloc 2 is outTask assignment
+            ScopedAllocationFailureGuard guard(2);
+            try {
+                mgr.dispatchHighestPriority(outTask);
+            } catch (const std::bad_alloc&) {
+                badAllocThrown = true;
+            } catch (...) {
+                unexpectedThrown = true;
+            }
+        }
+
+        // Verify that the intended exception was triggered at the exact target stage
+        TEST_CHECK(badAllocThrown);
+        TEST_CHECK(!unexpectedThrown);
+        TEST_CHECK(g_largeAllocAttempts == 2); // Confirms failure occurred on outTask assignment, not peekMax
+
+        // Verify Strong Exception Guarantee:
+        // 1. Task remains registered and Active in registry
+        TEST_CHECK(mgr.hasTask(longId));
+        TEST_CHECK(mgr.getActiveCount() == 1);
+        std::optional<TaskState> state = mgr.getTaskState(longId);
+        TEST_CHECK(state.has_value() && *state == TaskState::Active);
+
+        // 2. MinMaxHeap structure and invariants remain valid
+        TEST_CHECK(mgr.verifyHeapInvariants());
+
+        // 3. Subsequent dispatch succeeds and returns the exact same task
+        TEST_CHECK(mgr.dispatchHighestPriority(outTask));
+        TEST_CHECK(outTask.getTaskId() == longId);
+        TEST_CHECK(outTask.getPriority() == TaskPriority::Critical);
+        TEST_CHECK(mgr.getActiveCount() == 0);
+        state = mgr.getTaskState(longId);
+        TEST_CHECK(state.has_value() && *state == TaskState::Dispatched);
+    }
+
+    // Part 2: Lowest-priority dispatch exception safety during output assignment
+    {
+        TaskPriorityManager mgr;
+        const std::string longId = "TASK_LONG_ID_LOWEST_EXCEPTION_SAFETY_0002";
+        TEST_CHECK(mgr.registerTask(longId, TaskCategory::Audit, TaskPriority::Low, "DC2"));
+        TEST_CHECK(mgr.getActiveCount() == 1);
+
+        PriorityTask outTask("placeholder", TaskCategory::Pick, TaskPriority::Low, "DC_0", 0);
+
+        bool badAllocThrown = false;
+        bool unexpectedThrown = false;
+        {
+            // Large alloc 1 is peekMin internal entry; large alloc 2 is outTask assignment
+            ScopedAllocationFailureGuard guard(2);
+            try {
+                mgr.dispatchLowestPriority(outTask);
+            } catch (const std::bad_alloc&) {
+                badAllocThrown = true;
+            } catch (...) {
+                unexpectedThrown = true;
+            }
+        }
+
+        // Verify that the intended exception was triggered at the exact target stage
+        TEST_CHECK(badAllocThrown);
+        TEST_CHECK(!unexpectedThrown);
+        TEST_CHECK(g_largeAllocAttempts == 2); // Confirms failure occurred on outTask assignment, not peekMin
+
+        // Verify Strong Exception Guarantee:
+        TEST_CHECK(mgr.hasTask(longId));
+        TEST_CHECK(mgr.getActiveCount() == 1);
+        std::optional<TaskState> state = mgr.getTaskState(longId);
+        TEST_CHECK(state.has_value() && *state == TaskState::Active);
+        TEST_CHECK(mgr.verifyHeapInvariants());
+
+        // Subsequent dispatch succeeds and returns the exact same task
+        TEST_CHECK(mgr.dispatchLowestPriority(outTask));
+        TEST_CHECK(outTask.getTaskId() == longId);
+        TEST_CHECK(outTask.getPriority() == TaskPriority::Low);
+        TEST_CHECK(mgr.getActiveCount() == 0);
+        state = mgr.getTaskState(longId);
+        TEST_CHECK(state.has_value() && *state == TaskState::Dispatched);
+    }
+
+    // Part 3: Stale tombstone purging interplay with throwing dispatch
+    {
+        TaskPriorityManager mgr;
+
+        // Register and cancel a high-priority task with a short ID (SSO, 0 dynamic allocations)
+        TEST_CHECK(mgr.registerTask("STALE_TASK", TaskCategory::Emergency, TaskPriority::Critical, "DC1"));
+        TEST_CHECK(mgr.cancelTask("STALE_TASK"));
+        TEST_CHECK(mgr.getActiveCount() == 0);
+
+        // Register active normal-priority task with long ID (> 15 chars)
+        const std::string activeId = "TASK_LONG_ID_WITH_STALE_TOMBSTONE_TEST_003";
+        TEST_CHECK(mgr.registerTask(activeId, TaskCategory::Pick, TaskPriority::Normal, "DC1"));
+        TEST_CHECK(mgr.getActiveCount() == 1);
+
+        PriorityTask outTask("placeholder", TaskCategory::Pick, TaskPriority::Low, "DC_0", 0);
+
+        bool badAllocThrown = false;
+        bool unexpectedThrown = false;
+        {
+            // Iteration 1: peekMax peeks STALE_TASK (SSO -> 0 large allocs), detects stale, extracts it
+            // Iteration 2: peekMax peeks activeId (large alloc #1), outTask = record.task (large alloc #2)
+            ScopedAllocationFailureGuard guard(2);
+            try {
+                mgr.dispatchHighestPriority(outTask);
+            } catch (const std::bad_alloc&) {
+                badAllocThrown = true;
+            } catch (...) {
+                unexpectedThrown = true;
+            }
+        }
+
+        // Verify that the intended exception was triggered at the exact target stage
+        TEST_CHECK(badAllocThrown);
+        TEST_CHECK(!unexpectedThrown);
+        TEST_CHECK(g_largeAllocAttempts == 2); // Confirms failure occurred on outTask assignment
+
+        // Verify active task was NOT lost and remains Active
+        TEST_CHECK(mgr.hasTask(activeId));
+        TEST_CHECK(mgr.getActiveCount() == 1);
+        std::optional<TaskState> state = mgr.getTaskState(activeId);
+        TEST_CHECK(state.has_value() && *state == TaskState::Active);
+        TEST_CHECK(mgr.verifyHeapInvariants());
+
+        // Subsequent dispatch succeeds
+        TEST_CHECK(mgr.dispatchHighestPriority(outTask));
+        TEST_CHECK(outTask.getTaskId() == activeId);
+        TEST_CHECK(outTask.getPriority() == TaskPriority::Normal);
+        TEST_CHECK(mgr.getActiveCount() == 0);
+        state = mgr.getTaskState(activeId);
+        TEST_CHECK(state.has_value() && *state == TaskState::Dispatched);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Main Test Runner
 // ---------------------------------------------------------------------------
 int main()
@@ -409,6 +657,7 @@ int main()
     TEST_RUN(testDispatchAtMostOnce);
     TEST_RUN(testMixedOperationsAndHeapInvariants);
     TEST_RUN(testClearSemanticsAndIdReuse);
+    TEST_RUN(testDispatchExceptionSafety);
     TEST_REPORT();
 }
 
