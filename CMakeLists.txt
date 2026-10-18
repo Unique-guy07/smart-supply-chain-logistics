@@ -35,6 +35,7 @@ add_library(inventory_core STATIC
     src/graph/WarehouseGraph.cpp
     src/graph/WaitForGraph.cpp
     src/packing/CargoPacking.cpp
+    src/integration/SupplyChainPlatform.cpp
 )
 target_include_directories(inventory_core PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
@@ -160,3 +161,7 @@ add_test(NAME TestDeadlock COMMAND test_deadlock)
 add_executable(test_cargo_packing tests/test_cargo_packing.cpp)
 target_link_libraries(test_cargo_packing PRIVATE inventory_core)
 add_test(NAME TestCargoPacking COMMAND test_cargo_packing)
+
+add_executable(test_platform_prevalidation tests/test_platform_prevalidation.cpp)
+target_link_libraries(test_platform_prevalidation PRIVATE inventory_core)
+add_test(NAME TestPlatformPrevalidation COMMAND test_platform_prevalidation)
