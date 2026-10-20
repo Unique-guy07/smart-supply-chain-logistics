@@ -8,9 +8,14 @@
 
 #include <functional>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <unordered_set>
 #include <vector>
+
+#define SMART_SUPPLY_CHAIN_NO_MAIN
+#include "../src/main.cpp"
+#undef SMART_SUPPLY_CHAIN_NO_MAIN
 
 namespace integration {
 
@@ -997,6 +1002,236 @@ void testGuardedDispatchRecheckFailurePreemption()
 }
 
 // ---------------------------------------------------------------------------
+// 24. End-to-End Integrated Logistics Demonstration Workflow
+// ---------------------------------------------------------------------------
+void testEndToEndDemonstrationWorkflow()
+{
+    SupplyChainPlatform platform(101, 16);
+
+    // 1. Warehouse Spatial Navigation Network
+    auto& graph = platform.getWarehouseGraph();
+    graph.addVertex("DEPOT");
+    graph.addVertex("BIN_A1");
+    graph.addVertex("BIN_B1");
+    graph.addVertex("BIN_C1");
+    graph.addVertex("PACK_STATION_1");
+    graph.addVertex("DOCK_ALPHA");
+
+    graph.addBidirectionalAisle("DEPOT", "BIN_A1", 12.0);
+    graph.addBidirectionalAisle("BIN_A1", "BIN_B1", 15.0);
+    graph.addBidirectionalAisle("BIN_B1", "BIN_C1", 20.0);
+    graph.addBidirectionalAisle("BIN_A1", "PACK_STATION_1", 14.0);
+    graph.addBidirectionalAisle("BIN_B1", "PACK_STATION_1", 18.0);
+    graph.addBidirectionalAisle("BIN_C1", "PACK_STATION_1", 22.0);
+    graph.addDirectedEdge("PACK_STATION_1", "DOCK_ALPHA", 8.0);
+
+    // 2. Inventory Catalog & Packaging Profiles
+    auto& inv = platform.getInventoryManager();
+    TEST_CHECK(inv.addProduct(Product("SKU-LAPTOP", "Enterprise Laptop 15", "Electronics", 50, 1200.0, "WH-1", "BIN_A1")));
+    TEST_CHECK(inv.addProduct(Product("SKU-MONITOR", "Ultra-HD 4K Display 27", "Electronics", 30, 450.0, "WH-1", "BIN_B1")));
+    TEST_CHECK(inv.addProduct(Product("SKU-KEYBOARD", "Mechanical Pro Keyboard", "Accessories", 100, 80.0, "WH-1", "BIN_A1")));
+    TEST_CHECK(inv.addProduct(Product("SKU-DESK", "Motorized Standing Desk", "Furniture", 10, 600.0, "WH-1", "BIN_C1")));
+    TEST_CHECK(inv.addProduct(Product("SKU-CABLE", "Braided USB-C Cable 2m", "Accessories", 200, 15.0, "WH-1", "BIN_B1")));
+
+    platform.registerPackagingProfile("SKU-LAPTOP", PackagingProfile(35, 25, 5, 2.5));
+    platform.registerPackagingProfile("SKU-MONITOR", PackagingProfile(60, 40, 15, 6.0));
+    platform.registerPackagingProfile("SKU-KEYBOARD", PackagingProfile(45, 15, 4, 1.2));
+    platform.registerPackagingProfile("SKU-DESK", PackagingProfile(120, 80, 20, 35.0));
+    platform.registerPackagingProfile("SKU-CABLE", PackagingProfile(15, 10, 5, 0.4));
+
+    // 3. Slotting Analysis (Pareto ABC)
+    SlottingReport slotReport = inv.analyzeSlotting();
+    TEST_CHECK(slotReport.isValid);
+    TEST_CHECK(slotReport.totalProducts == 5);
+    TEST_CHECK(slotReport.totalInventoryValue > 90000.0);
+
+    // 4. Inbound Customer Orders (DEPQ Priority Scheduling)
+    auto& om = platform.getOrderManager();
+    Order ord1("ORD-1001", "CORP-GLOBAL", OrderPriority::Urgent);
+    ord1.addItem("SKU-LAPTOP", 1);
+    ord1.addItem("SKU-KEYBOARD", 1);
+    ord1.setShippingParameters(15.0, 3.7);
+    TEST_CHECK(om.submitOrder(ord1));
+
+    Order ord2("ORD-1002", "CUST-RETAIL", OrderPriority::Normal);
+    ord2.addItem("SKU-MONITOR", 2);
+    ord2.setShippingParameters(25.0, 12.0);
+    TEST_CHECK(om.submitOrder(ord2));
+
+    Order ord3("ORD-1003", "STORE-SOUTH", OrderPriority::Low);
+    ord3.addItem("SKU-DESK", 1);
+    ord3.setShippingParameters(40.0, 35.0);
+    TEST_CHECK(om.submitOrder(ord3));
+
+    TEST_CHECK(om.getPendingCount() == 3);
+
+    std::string topCandidate;
+    TEST_CHECK(om.peekHighestPriorityOrder(topCandidate));
+    TEST_CHECK(topCandidate == "ORD-1001");
+
+    // 5. Route Prevalidation
+    auto routePlan = platform.planOrderRoute(topCandidate, "DEPOT", "PACK_STATION_1", "DOCK_ALPHA");
+    TEST_CHECK(routePlan.success);
+    TEST_CHECK(routePlan.totalCost == 34.0); // 12 + 14 + 8
+    TEST_CHECK(routePlan.legs.size() == 3);
+
+    // 6. 3D Cargo Packing Prevalidation
+    packing::Container container(120, 80, 80);
+    auto packResult = platform.validateOrderPacking(topCandidate, container);
+    TEST_CHECK(packResult.allPackagesPlaced);
+    TEST_CHECK(packResult.placements.size() == 2);
+
+    // 7. Guarded Order Dispatch & Inventory Deduction
+    const int laptopBefore = inv.findProduct("SKU-LAPTOP")->getQuantity();
+    const int keyboardBefore = inv.findProduct("SKU-KEYBOARD")->getQuantity();
+
+    auto dispatchResult = platform.dispatchHighestPriorityOrder(
+        "DEPOT", "PACK_STATION_1", "DOCK_ALPHA", container);
+    TEST_CHECK(dispatchResult.success);
+    TEST_CHECK(dispatchResult.dispatchAttempted);
+    TEST_CHECK(dispatchResult.orderId == "ORD-1001");
+    TEST_CHECK(dispatchResult.resultingStatus.has_value());
+    TEST_CHECK(dispatchResult.resultingStatus.value() == OrderStatus::Completed);
+
+    TEST_CHECK(inv.findProduct("SKU-LAPTOP")->getQuantity() == laptopBefore - 1);
+    TEST_CHECK(inv.findProduct("SKU-KEYBOARD")->getQuantity() == keyboardBefore - 1);
+    TEST_CHECK(om.getPendingCount() == 2);
+    TEST_CHECK(om.getCompletedCount() == 1);
+
+    // Verify next in line is ORD-1002
+    std::string nextCandidate;
+    TEST_CHECK(om.peekHighestPriorityOrder(nextCandidate));
+    TEST_CHECK(nextCandidate == "ORD-1002");
+
+    // 8. AGV Traffic & Deadlock Resolution
+    auto& wfg = platform.getWaitForGraph();
+    wfg.addAgv("AGV-ALPHA", TaskPriority::High);
+    wfg.addAgv("AGV-BETA", TaskPriority::Urgent);
+    wfg.addAgv("AGV-GAMMA", TaskPriority::Low);
+    wfg.addDependency("AGV-ALPHA", "AGV-BETA");
+    wfg.addDependency("AGV-BETA", "AGV-GAMMA");
+    wfg.addDependency("AGV-GAMMA", "AGV-ALPHA");
+
+    DeadlockCycle cycle = wfg.detectDeadlock();
+    TEST_CHECK(cycle.hasDeadlock);
+    TEST_CHECK(cycle.cycle.size() == 4); // [ALPHA, BETA, GAMMA, ALPHA]
+    std::string victim = wfg.selectVictim(cycle);
+    TEST_CHECK(victim == "AGV-GAMMA");
+
+    wfg.removeDependency("AGV-BETA", "AGV-GAMMA");
+    wfg.removeDependency("AGV-GAMMA", "AGV-ALPHA");
+    TEST_CHECK(!wfg.detectDeadlock().hasDeadlock);
+
+    // 9. Cyclic QA Auditing
+    auto& audit = platform.getAuditCycle();
+    audit.addTarget("BIN_A1");
+    audit.addTarget("BIN_B1");
+    audit.addTarget("BIN_C1");
+    audit.addTarget("PACK_STATION_1");
+    audit.addTarget("DOCK_ALPHA");
+    TEST_CHECK(audit.getTargetCount() == 5);
+
+    auto audited = audit.performAuditSelection(2);
+    TEST_CHECK(audited.size() == 2);
+    TEST_CHECK(audit.getTargetCount() == 3);
+
+    // 10. Operational Task Prioritization
+    auto& tm = platform.getTaskManager();
+    TEST_CHECK(tm.registerTask("TASK-SPILL", TaskCategory::Emergency, TaskPriority::Critical, "DC-CENTRAL"));
+    TEST_CHECK(tm.registerTask("TASK-SWEEP", TaskCategory::Maintenance, TaskPriority::Low, "DC-CENTRAL"));
+    TEST_CHECK(tm.getActiveCount() == 2);
+
+    PriorityTask dispHighest("TEMP", TaskCategory::Pick, TaskPriority::Low, "DC", 0);
+    TEST_CHECK(tm.dispatchHighestPriority(dispHighest));
+    TEST_CHECK(dispHighest.getTaskId() == "TASK-SPILL");
+
+    PriorityTask dispLowest("TEMP", TaskCategory::Pick, TaskPriority::Low, "DC", 0);
+    TEST_CHECK(tm.dispatchLowestPriority(dispLowest));
+    TEST_CHECK(dispLowest.getTaskId() == "TASK-SWEEP");
+    TEST_CHECK(tm.getActiveCount() == 0);
+}
+
+// ---------------------------------------------------------------------------
+// 25. Demo Runner Failure Reporting Regression
+// ---------------------------------------------------------------------------
+void testDemoRunnerFailureReportingRegression()
+{
+    // 1. Failure Scenario: Insufficient Stock for candidate order (Step 7 failure)
+    {
+        SupplyChainPlatform platform(101, 16);
+        cli::seedDemoPlatform(platform);
+
+        // Deplete stock for SKU-LAPTOP so order ORD-1001 cannot be fulfilled
+        bool updated = platform.getInventoryManager().updateProductQuantity("SKU-LAPTOP", 0);
+        TEST_CHECK(updated);
+
+        std::ostringstream out;
+        bool ok = cli::runFullDemonstration(platform, out);
+
+        TEST_CHECK(!ok);
+        std::string text = out.str();
+        TEST_CHECK(text.find("[SUCCESS] ALL INTEGRATED MODULES DEMONSTRATED WITH 100% PASSING INVARIANTS") == std::string::npos);
+        TEST_CHECK(text.find("[FAILURE] DEMONSTRATION WORKFLOW FAILED") != std::string::npos);
+        TEST_CHECK(text.find("Step 7 - Guarded Order Dispatch and Fulfillment") != std::string::npos);
+        TEST_CHECK(text.find("fulfillment failed") != std::string::npos || text.find("Insufficient stock") != std::string::npos);
+    }
+
+    // 2. Failure Scenario: Cargo-packing prevalidation failure (Step 6 failure)
+    {
+        SupplyChainPlatform platform(101, 16);
+        cli::seedDemoPlatform(platform);
+
+        // Re-register SKU-LAPTOP packaging profile with oversized dimensions that exceed container (120x80x80)
+        platform.registerPackagingProfile("SKU-LAPTOP", PackagingProfile(200, 200, 200, 50.0));
+
+        std::ostringstream out;
+        bool ok = cli::runFullDemonstration(platform, out);
+
+        TEST_CHECK(!ok);
+        std::string text = out.str();
+        TEST_CHECK(text.find("[SUCCESS] ALL INTEGRATED MODULES DEMONSTRATED WITH 100% PASSING INVARIANTS") == std::string::npos);
+        TEST_CHECK(text.find("[FAILURE] DEMONSTRATION WORKFLOW FAILED") != std::string::npos);
+        TEST_CHECK(text.find("Step 6 - Cargo Packing Prevalidation") != std::string::npos);
+    }
+
+    // 3. Failure Scenario: Route prevalidation failure (Step 5 failure)
+    {
+        SupplyChainPlatform platform(101, 16);
+        cli::seedDemoPlatform(platform);
+
+        // Move SKU-LAPTOP to an isolated bin that cannot reach packing station
+        auto& graph = platform.getWarehouseGraph();
+        graph.addVertex("ISOLATED_BIN");
+        auto& inv = platform.getInventoryManager();
+        TEST_CHECK(inv.removeProduct("SKU-LAPTOP"));
+        TEST_CHECK(inv.addProduct(Product("SKU-LAPTOP", "Enterprise Laptop 15", "Electronics", 50, 1200.0, "WH-1", "ISOLATED_BIN")));
+
+        std::ostringstream out;
+        bool ok = cli::runFullDemonstration(platform, out);
+
+        TEST_CHECK(!ok);
+        std::string text = out.str();
+        TEST_CHECK(text.find("[SUCCESS] ALL INTEGRATED MODULES DEMONSTRATED WITH 100% PASSING INVARIANTS") == std::string::npos);
+        TEST_CHECK(text.find("[FAILURE] DEMONSTRATION WORKFLOW FAILED") != std::string::npos);
+        TEST_CHECK(text.find("Step 5 - Route Prevalidation") != std::string::npos);
+    }
+
+    // 4. Successful Seeded Scenario: All critical steps succeed, producing success banner
+    {
+        SupplyChainPlatform platform(101, 16);
+        cli::seedDemoPlatform(platform);
+
+        std::ostringstream out;
+        bool ok = cli::runFullDemonstration(platform, out);
+
+        TEST_CHECK(ok);
+        std::string text = out.str();
+        TEST_CHECK(text.find("[SUCCESS] ALL INTEGRATED MODULES DEMONSTRATED WITH 100% PASSING INVARIANTS") != std::string::npos);
+        TEST_CHECK(text.find("[FAILURE]") == std::string::npos);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Main test runner
 // ---------------------------------------------------------------------------
 int main()
@@ -1024,6 +1259,8 @@ int main()
     TEST_RUN(testGuardedDispatchRecheckFailureCancelledSoleOrder);
     TEST_RUN(testGuardedDispatchRecheckFailureCancelledWithStandbyOrder);
     TEST_RUN(testGuardedDispatchRecheckFailurePreemption);
+    TEST_RUN(testEndToEndDemonstrationWorkflow);
+    TEST_RUN(testDemoRunnerFailureReportingRegression);
 
     TEST_REPORT();
 }
