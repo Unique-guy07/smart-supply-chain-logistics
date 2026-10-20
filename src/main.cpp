@@ -65,7 +65,7 @@ void printFailureBanner(std::ostream& out, std::string_view failedStep, std::str
 void printMenu(std::ostream& out)
 {
     out << "\n------------------------------- OPERATIONAL MENU -------------------------------\n"
-        << "  [1] Run Full End-to-End Logistics Demonstration (Automated / All Modules)\n"
+        << "  [1] Run Core Integrated Supply Chain Demonstration (Automated)\n"
         << "  [2] Guarded Order Dispatch & Route / 3D Cargo Packing Prevalidation\n"
         << "  [3] Inventory Catalog & Hierarchical ABC Slotting Analysis\n"
         << "  [4] AGV Traffic & Deadlock Detection / Resolution (Wait-For Graph)\n"
@@ -450,7 +450,7 @@ bool runFullDemonstration(integration::SupplyChainPlatform& platform, std::ostre
     out << "  Remaining Active Tasks in Coordinator Queue: " << tm.getActiveCount() << "\n";
 
     out << "\n================================================================================\n"
-        << "  [SUCCESS] ALL INTEGRATED MODULES DEMONSTRATED WITH 100% PASSING INVARIANTS\n"
+        << "  [SUCCESS] CORE SUPPLY CHAIN PIPELINE DEMONSTRATION COMPLETE (10/10 STEPS PASSED)\n"
         << "================================================================================\n";
 
     return true;

@@ -1170,7 +1170,7 @@ void testDemoRunnerFailureReportingRegression()
 
         TEST_CHECK(!ok);
         std::string text = out.str();
-        TEST_CHECK(text.find("[SUCCESS] ALL INTEGRATED MODULES DEMONSTRATED WITH 100% PASSING INVARIANTS") == std::string::npos);
+        TEST_CHECK(text.find("[SUCCESS] CORE SUPPLY CHAIN PIPELINE DEMONSTRATION COMPLETE (10/10 STEPS PASSED)") == std::string::npos);
         TEST_CHECK(text.find("[FAILURE] DEMONSTRATION WORKFLOW FAILED") != std::string::npos);
         TEST_CHECK(text.find("Step 7 - Guarded Order Dispatch and Fulfillment") != std::string::npos);
         TEST_CHECK(text.find("fulfillment failed") != std::string::npos || text.find("Insufficient stock") != std::string::npos);
@@ -1189,7 +1189,7 @@ void testDemoRunnerFailureReportingRegression()
 
         TEST_CHECK(!ok);
         std::string text = out.str();
-        TEST_CHECK(text.find("[SUCCESS] ALL INTEGRATED MODULES DEMONSTRATED WITH 100% PASSING INVARIANTS") == std::string::npos);
+        TEST_CHECK(text.find("[SUCCESS] CORE SUPPLY CHAIN PIPELINE DEMONSTRATION COMPLETE (10/10 STEPS PASSED)") == std::string::npos);
         TEST_CHECK(text.find("[FAILURE] DEMONSTRATION WORKFLOW FAILED") != std::string::npos);
         TEST_CHECK(text.find("Step 6 - Cargo Packing Prevalidation") != std::string::npos);
     }
@@ -1211,7 +1211,7 @@ void testDemoRunnerFailureReportingRegression()
 
         TEST_CHECK(!ok);
         std::string text = out.str();
-        TEST_CHECK(text.find("[SUCCESS] ALL INTEGRATED MODULES DEMONSTRATED WITH 100% PASSING INVARIANTS") == std::string::npos);
+        TEST_CHECK(text.find("[SUCCESS] CORE SUPPLY CHAIN PIPELINE DEMONSTRATION COMPLETE (10/10 STEPS PASSED)") == std::string::npos);
         TEST_CHECK(text.find("[FAILURE] DEMONSTRATION WORKFLOW FAILED") != std::string::npos);
         TEST_CHECK(text.find("Step 5 - Route Prevalidation") != std::string::npos);
     }
@@ -1226,7 +1226,7 @@ void testDemoRunnerFailureReportingRegression()
 
         TEST_CHECK(ok);
         std::string text = out.str();
-        TEST_CHECK(text.find("[SUCCESS] ALL INTEGRATED MODULES DEMONSTRATED WITH 100% PASSING INVARIANTS") != std::string::npos);
+        TEST_CHECK(text.find("[SUCCESS] CORE SUPPLY CHAIN PIPELINE DEMONSTRATION COMPLETE (10/10 STEPS PASSED)") != std::string::npos);
         TEST_CHECK(text.find("[FAILURE]") == std::string::npos);
     }
 }

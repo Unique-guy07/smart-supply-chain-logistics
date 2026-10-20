@@ -113,7 +113,7 @@ InventoryManager OrderManager WarehouseGraph WaitForGraph  AuditCycle / TaskMana
 ### Prerequisites
 - **Operating System**: Windows 10/11 (x64)
 - **Compiler**: Visual Studio 2022 (MSVC v143+) with C++20 support
-- **Build System**: CMake 3.20 or newer
+- **Build System**: CMake 4.2 or newer
 
 ### Building from Command Line (Developer PowerShell or CMD)
 
@@ -141,6 +141,11 @@ The test suite consists of 29 CTest suites containing hundreds of individual ass
 ```powershell
 ctest --test-dir build -C Debug --output-on-failure
 ```
+
+The end-to-end workflow coverage in `TestPlatformPrevalidation` invokes
+`cli::runFullDemonstration(...)` in-process through the C++ API (with the
+application `main` excluded for the test build). It does not independently
+launch `smart_supply_chain.exe --demo` as a subprocess.
 
 To run individual focused test suites directly:
 ```powershell
@@ -176,7 +181,7 @@ Launch the application without arguments to enter the interactive menu:
 Platform initialized with standard warehouse demonstration dataset.
 
 ------------------------------- OPERATIONAL MENU -------------------------------
-  [1] Run Full End-to-End Logistics Demonstration (Automated / All Modules)
+  [1] Run Core Integrated Supply Chain Demonstration (Automated)
   [2] Guarded Order Dispatch & Route / 3D Cargo Packing Prevalidation
   [3] Inventory Catalog & Hierarchical ABC Slotting Analysis
   [4] AGV Traffic & Deadlock Detection / Resolution (Wait-For Graph)
@@ -189,7 +194,7 @@ Select an option [0-7]:
 ```
 
 ### Interactive Features Walkthrough
-- **Option 1**: Runs the complete 10-step demonstration touching all modules.
+- **Option 1**: Runs the complete 10-step core integrated supply-chain demonstration.
 - **Option 2**: Performs read-only route planning, 3D cargo packing prevalidation, and guarded dispatch of the top pending order.
 - **Option 3**: Inspects catalog items in lexicographical BST order, performs exact SKU lookups across Master and Device tiers, and outputs the Pareto ABC slotting report.
 - **Option 4**: Detects AGV circular waits via 3-color DFS, displays the cycle chain, and performs deterministic victim selection based on priority.
@@ -279,7 +284,7 @@ Executing `.\build\Debug\smart_supply_chain.exe --demo` produces verified output
   Remaining Active Tasks in Coordinator Queue: 2
 
 ================================================================================
-  [SUCCESS] ALL INTEGRATED MODULES DEMONSTRATED WITH 100% PASSING INVARIANTS
+  [SUCCESS] CORE SUPPLY CHAIN PIPELINE DEMONSTRATION COMPLETE (10/10 STEPS PASSED)
 ================================================================================
 ```
 
@@ -298,5 +303,5 @@ Executing `.\build\Debug\smart_supply_chain.exe --demo` produces verified output
 In accordance with strict verification standards, the following differences between theoretical design sketches in `PROJECT_SPEC.md` and the final implementation are documented:
 
 - **Module 1 (Spatial Representation)**: The specification originally outlined a 2D contiguous array, a 3-tuple sparse matrix, and a fast transpose algorithm for warehouse floor plans. In the operational implementation, spatial navigation and routing were standardized on the graph adjacency network (`WarehouseGraph`), which directly drives BFS and Dijkstra route planning. The 2D contiguous array, 3-tuple sparse matrix, and fast transpose remain unimplemented specification requirements.
-- **Module 2 (Memory Management & Container Gaps)**: The specification described a custom pool allocator, a free list, and a doubly linked list. The production codebase adopts standard C++20 allocators with RAII value and move semantics, ensuring strong memory safety, exception safety, and preventing memory leaks without raw-pointer dangling risks. The custom pool allocator, free list, and doubly linked list remain unimplemented specification requirements.
-- **Operational Scope vs. Specification Compliance**: While full specification compliance is not claimed due to the Module 1 and Module 2 gaps noted above, the operational logistics pipeline successfully integrates its planned functional workflow areas (Multi-Tier Inventory Indexing, DEPQ Order Scheduling & Pricing, Pareto Slotting, Dual-Ended Task Prioritization, Warehouse Shortest-Path Routing, AGV Deadlock Resolution, 3D Cargo Packing Prevalidation, and Guarded Platform Dispatch). All implemented operational components are verified across 29 automated test suites and fully exercisable through the CLI.
+- **Module 2 (Memory Management & Container Gaps)**: The specification described a custom pool allocator, a free list, a singly linked list for directional conveyor systems, and a doubly linked list for bidirectional aisles. These structures remain unimplemented specification requirements. The production codebase uses standard C++20 allocators with RAII value and move semantics for its implemented containers; this does not satisfy the explicit Module 2 custom-data-structure requirements.
+- **Operational Scope vs. Specification Compliance**: While full specification compliance is not claimed due to the Module 1 and Module 2 gaps noted above, the operational logistics pipeline successfully integrates Multi-Tier Inventory Indexing, DEPQ Order Scheduling and Pricing, Pareto Slotting, Warehouse Shortest-Path Routing, AGV Deadlock Detection, 3D Cargo Packing Prevalidation, Guarded Platform Dispatch, cyclic auditing, and dual-ended task prioritization. These capabilities are demonstrated through the integrated CLI workflow. `DistributedTaskQueue`, `OperationalMetricsRanker`, and the Prim/Kruskal spanning-tree planners are tested separately but are not exposed through the current CLI menu. The CLI's Dijkstra route-planning workflow uses `FibonacciHeap` internally, but does not expose standalone heap operations.
